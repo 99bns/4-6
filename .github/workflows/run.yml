@@ -1,4 +1,4 @@
-name: 4-6
+name: "4-6"
 
 on:
   workflow_dispatch:
@@ -11,27 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # --- akun-4 ---
-          - path: 'akun-4/akun-4'
-          - path: 'akun-4/akun-4_2'
-          - path: 'akun-4/akun-4_3'
-          - path: 'akun-4/akun-4_4'
-          - path: 'akun-4/akun-4_5'
-
-          # --- akun-5 ---
-          - path: 'akun-5/akun-5'
-          - path: 'akun-5/akun-5_2'
-          - path: 'akun-5/akun-5_3'
-          - path: 'akun-5/akun-5_4'
-          - path: 'akun-5/akun-5_5'
-
-          # --- akun-6 ---
-          - path: 'akun-6/akun-6'
-          - path: 'akun-6/akun-6_2'
-          - path: 'akun-6/akun-6_3'
-          - path: 'akun-6/akun-6_4'
-          - path: 'akun-6/akun-6_5'
+        target_folder: ['akun-4', 'akun-5', 'akun-6']
 
     steps:
     - name: Checkout Repository
@@ -57,7 +37,24 @@ jobs:
         GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
       run: python download_drive.py
 
-    - name: Run Bot Script
+    - name: Run All Subfolder Bots In Parallel
       run: |
-        cd ${{ matrix.path }}
-        python3 seofast_zhp.py
+        python -c "
+        import os, subprocess
+
+        target = '${{ matrix.target_folder }}'
+        processes = []
+
+        if os.path.exists(target):
+            for root, dirs, files in os.walk(target):
+                if 'seofast_zhp.py' in files:
+                    print(f'==========================================')
+                    print(f'Menjalankan bot di: {root}')
+                    print(f'==========================================')
+                    p = subprocess.Popen(['python3', 'seofast_zhp.py'], cwd=root)
+                    processes.append(p)
+
+        # Tunggu semua sub-process selesai
+        for p in processes:
+            p.wait()
+        "
