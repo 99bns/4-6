@@ -1,4 +1,4 @@
-name: '4-6'
+name: "4-6"
 
 on:
   workflow_dispatch:
@@ -32,11 +32,22 @@ jobs:
     - name: Scan Folders Dynamically
       id: set-matrix
       run: |
-        # Cari semua folder tempat seofast_zhp.py berada khusus akun 4-6
-        PATHS=$(find akun-4 akun-5 akun-6 -type f -name "seofast_zhp.py" 2>/dev/null | xargs -n1 dirname | jq -R . | jq -s -c .)
-        
-        echo "Matrix path ditemukan: $PATHS"
-        echo "matrix=$PATHS" >> $GITHUB_OUTPUT
+        python -c "
+        import os, json
+
+        targets = ['akun-4', 'akun-5', 'akun-6']
+        paths = []
+
+        for target in targets:
+            if os.path.exists(target):
+                for root, dirs, files in os.walk(target):
+                    if 'seofast_zhp.py' in files:
+                        paths.append(root)
+
+        print('Path ditemukan:', paths)
+        with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+            f.write(f'matrix={json.dumps(paths)}\n')
+        "
 
   run-bot:
     needs: setup-matrix
@@ -44,7 +55,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        path: ${{ JSON(needs.setup-matrix.outputs.matrix) }}
+        path: ${{ fromJson(needs.setup-matrix.outputs.matrix) }}
 
     steps:
     - name: Checkout Repository
