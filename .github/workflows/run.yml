@@ -6,12 +6,55 @@ on:
     - cron: '5 0,6,12,18 * * *'
 
 jobs:
+  setup-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Download & Extract Files from Google Drive
+      env:
+        GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+      run: python download_drive.py
+
+    - name: Generate Matrix Output
+      id: set-matrix
+      run: |
+        python -c "
+        import os, json, sys
+
+        subfolders = []
+        target_dirs = ['akun-4', 'akun-5', 'akun-6']
+        
+        for t in target_dirs:
+            if os.path.exists(t):
+                for root, dirs, files in os.walk(t):
+                    if 'seofast_zhp.py' in files:
+                        subfolders.append(root)
+
+        subfolders.sort()
+        print('Subfolders found:', subfolders)
+        
+        # Simpan ke GitHub Output
+        with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+            f.write(f'matrix={json.dumps(subfolders)}\n')
+        "
+
   run-bot:
+    needs: setup-matrix
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      max-parallel: 10   # Batasi 10 jalan serentak biar gak kena limit antrean 'busy runner'
       matrix:
-        target_folder: ['akun-4', 'akun-5', 'akun-6']
+        path: ${{ fromJson(needs.setup-matrix.outputs.matrix) }}
 
     steps:
     - name: Checkout Repository
@@ -37,24 +80,7 @@ jobs:
         GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
       run: python download_drive.py
 
-    - name: Run All Subfolder Bots In Parallel
+    - name: Run Bot Script
       run: |
-        python -c "
-        import os, subprocess
-
-        target = '${{ matrix.target_folder }}'
-        processes = []
-
-        if os.path.exists(target):
-            for root, dirs, files in os.walk(target):
-                if 'seofast_zhp.py' in files:
-                    print(f'==========================================')
-                    print(f'Menjalankan bot di: {root}')
-                    print(f'==========================================')
-                    p = subprocess.Popen(['python3', 'seofast_zhp.py'], cwd=root)
-                    processes.append(p)
-
-        # Tunggu semua sub-process selesai
-        for p in processes:
-            p.wait()
-        "
+        cd "${{ matrix.path }}"
+        python seofast_zhp.py
