@@ -6,12 +6,45 @@ on:
     - cron: '5 0,6,12,18 * * *'
 
 jobs:
+  setup-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install Google API Client
+      run: |
+        python -m pip install --upgrade pip
+        pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib
+
+    - name: Download & Extract Files from Google Drive
+      env:
+        GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+      run: python download_drive.py
+
+    - name: Scan Folders Dynamically
+      id: set-matrix
+      run: |
+        # Cari semua sub-folder yang berisi file seofast_zhp.py khusus untuk akun 4, 5, dan 6
+        PATHS=$(find akun-4 akun-5 akun-6 -type f -name "seofast_zhp.py" 2>/dev/null | xargs -n1 dirname | jq -R . | jq -s -c .)
+        
+        echo "Matrix path ditemukan: $PATHS"
+        echo "matrix=$PATHS" >> $GITHUB_OUTPUT
+
   run-bot:
+    needs: setup-matrix
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        target_folder: ['akun-4', 'akun-5', 'akun-6']
+        path: ${{ JSON(needs.setup-matrix.outputs.matrix) }}
 
     steps:
     - name: Checkout Repository
@@ -37,18 +70,7 @@ jobs:
         GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
       run: python download_drive.py
 
-    - name: Run All Bot Scripts in Target Folder
+    - name: Run Bot Script
       run: |
-        echo "Scanning all seofast_zhp.py inside '${{ matrix.target_folder }}'..."
-        
-        # Cari semua file seofast_zhp.py di dalam folder target & jalankan
-        find ${{ matrix.target_folder }} -type f -name "seofast_zhp.py" | while read script; do
-          dir=$(dirname "$script")
-          echo "=========================================="
-          echo "Running bot in: $dir"
-          echo "=========================================="
-          (cd "$dir" && python3 seofast_zhp.py) &
-        done
-        
-        # Tunggu semua bot selesai berjalan
-        wait
+        cd ${{ matrix.path }}
+        python3 seofast_zhp.py
