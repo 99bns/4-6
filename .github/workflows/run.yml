@@ -8,7 +8,6 @@ on:
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 330
     strategy:
       fail-fast: false
       matrix:
@@ -41,21 +40,21 @@ jobs:
 
     - name: Run All Subfolder Bots In Parallel
       run: |
-        target="${{ matrix.target }}"
-        echo "=== MENCARI SUBFOLDER DENGAN TARGET: $target ==="
-        
-        # Cari semua folder yang punya seofast_zhp.py & cocok dengan target
-        find . -type f -name "seofast_zhp.py" | grep "$target" | while read -r script_path; do
-          dir=$(dirname "$script_path")
-          echo "==> Menjalankan Bot di: $dir"
-          (
-            cd "$dir" || exit
-            until python3 seofast_zhp.py; do
-              echo "[!] Bot di $dir terhenti (Exit Code: $?). Auto-restart dalam 5 detik..."
-              sleep 5
-            done
-          ) &
-        done
+        python -c "
+        import os, subprocess
 
-        # Tunggu semua background process bot selesai
-        wait
+        target = '${{ matrix.target }}'
+        processes = []
+
+        if os.path.exists(target):
+            for root, dirs, files in os.walk(target):
+                if 'seofast_zhp.py' in files:
+                    print(f'==> Jalankan Loop Bot: {root}')
+                    p = subprocess.Popen(['python3', 'seofast_zhp.py'], cwd=root)
+                    processes.append(p)
+
+            for p in processes:
+                p.wait()
+        else:
+            print(f'Folder {target} tidak ditemukan!')
+        "
