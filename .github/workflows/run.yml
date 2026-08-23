@@ -1,4 +1,4 @@
-name: 3-4
+name: "sf1m"
 
 on:
   workflow_dispatch:
@@ -12,20 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # --- akun-3 ---
-          - path: 'akun-3/akun-3'
-          - path: 'akun-3/akun-3_2'
-          - path: 'akun-3/akun-3_3'
-          - path: 'akun-3/akun-3_4'
-          - path: 'akun-3/akun-3_5'
-
-          # --- akun-4 ---
-          - path: 'akun-4/akun-4'
-          - path: 'akun-4/akun-4_2'
-          - path: 'akun-4/akun-4_3'
-          - path: 'akun-4/akun-4_4'
-          - path: 'akun-4/akun-4_5'
+        target: ['akun-4', 'akun-5', 'akun-6']
 
     steps:
     - name: Checkout Repository
@@ -50,13 +37,25 @@ jobs:
       env:
         GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
         DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FILE_ID }}
-        TARGET_PATH: ${{ matrix.path }}
       run: python download_drive.py
 
-    - name: Run Bot Script with Auto-Restart
+    - name: Run All Subfolder Bots In Parallel
       run: |
-        cd ${{ matrix.path }}
-        until python3 seofast_zhp.py; do
-          echo "[!] Bot di ${{ matrix.path }} terhenti/crash (Exit Code: $?). Merestart bot dalam 5 detik..."
-          sleep 5
+        target="${{ matrix.target }}"
+        echo "=== MENCARI SUBFOLDER DENGAN TARGET: $target ==="
+        
+        # Cari semua folder yang punya seofast_zhp.py & cocok dengan target
+        find . -type f -name "seofast_zhp.py" | grep "$target" | while read -r script_path; do
+          dir=$(dirname "$script_path")
+          echo "==> Menjalankan Bot di: $dir"
+          (
+            cd "$dir" || exit
+            until python3 seofast_zhp.py; do
+              echo "[!] Bot di $dir terhenti (Exit Code: $?). Auto-restart dalam 5 detik..."
+              sleep 5
+            done
+          ) &
         done
+
+        # Tunggu semua background process bot selesai
+        wait
