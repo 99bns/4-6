@@ -1,4 +1,4 @@
-name: "4-6"
+name: 3-4
 
 on:
   workflow_dispatch:
@@ -8,10 +8,24 @@ on:
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+    timeout-minutes: 330
     strategy:
       fail-fast: false
       matrix:
-        target: ['akun-4', 'akun-5', 'akun-6']
+        include:
+          # --- akun-3 ---
+          - path: 'akun-3/akun-3'
+          - path: 'akun-3/akun-3_2'
+          - path: 'akun-3/akun-3_3'
+          - path: 'akun-3/akun-3_4'
+          - path: 'akun-3/akun-3_5'
+
+          # --- akun-4 ---
+          - path: 'akun-4/akun-4'
+          - path: 'akun-4/akun-4_2'
+          - path: 'akun-4/akun-4_3'
+          - path: 'akun-4/akun-4_4'
+          - path: 'akun-4/akun-4_5'
 
     steps:
     - name: Checkout Repository
@@ -36,25 +50,13 @@ jobs:
       env:
         GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
         DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FILE_ID }}
+        TARGET_PATH: ${{ matrix.path }}
       run: python download_drive.py
 
-    - name: Run All Subfolder Bots In Parallel
+    - name: Run Bot Script with Auto-Restart
       run: |
-        python -c "
-        import os, subprocess
-
-        target = '${{ matrix.target }}'
-        processes = []
-
-        if os.path.exists(target):
-            for root, dirs, files in os.walk(target):
-                if 'seofast_zhp.py' in files:
-                    print(f'==> Jalankan Loop Bot: {root}')
-                    p = subprocess.Popen(['python3', 'seofast_zhp.py'], cwd=root)
-                    processes.append(p)
-
-            for p in processes:
-                p.wait()
-        else:
-            print(f'Folder {target} tidak ditemukan!')
-        "
+        cd ${{ matrix.path }}
+        until python3 seofast_zhp.py; do
+          echo "[!] Bot di ${{ matrix.path }} terhenti/crash (Exit Code: $?). Merestart bot dalam 5 detik..."
+          sleep 5
+        done
