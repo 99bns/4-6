@@ -13,11 +13,9 @@ def main():
     if not sa_key_info:
         raise ValueError("Secret GCP_SA_KEY tidak ditemukan!")
 
-    target_path = os.environ.get('TARGET_PATH', '')
-    target_account = target_path.split('/')[0] if '/' in target_path else target_path
-
+    target_account = os.environ.get('TARGET_ACCOUNT', '').strip()
     if not target_account:
-        print("[!] TARGET_PATH tidak ditemukan, proses dibatalkan.")
+        print("[!] TARGET_ACCOUNT tidak terdeteksi, unduh dibatalkan.")
         return
 
     exact_zip_name = f"{target_account}.zip"
@@ -28,7 +26,6 @@ def main():
 
     print(f"Mencari file SPESIFIK: '{exact_zip_name}' di Drive...")
     
-    # Query cari nama file yang PERSIS SAMA
     query = f"name = '{exact_zip_name}' and trashed = false"
     results = service.files().list(
         q=query,
@@ -39,14 +36,13 @@ def main():
     files = results.get('files', [])
 
     if not files:
-        print(f"[!] PERINGATAN: File '{exact_zip_name}' TIDAK DITEMUKAN di Drive!")
+        print(f"[!] PERINGATAN: File '{exact_zip_name}' tidak ditemukan di Drive!")
         return
 
-    # Mengunduh HANYA file yang cocok persis
     for file in files:
         f_id = file['id']
         f_name = file['name']
-        print(f"--> Mengunduh HANYA {f_name} (ID: {f_id})...")
+        print(f"--> Mengunduh {f_name} (ID: {f_id})...")
         
         request = service.files().get_media(fileId=f_id)
         fh = io.BytesIO()
