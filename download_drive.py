@@ -10,8 +10,6 @@ SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 
 target_env = os.environ.get('TARGET_ACCOUNT')
 
-# Jika dari runner dapet '1', maka dipaksa cari '1.zip'
-# Jika tidak ada env, default list '1.zip' sampai '10.zip'
 if target_env:
     TARGET_SM = [f"{target_env}.zip"]
 else:
@@ -45,7 +43,6 @@ def main():
         f_id = file['id']
         f_name = file['name']
                 
-        # Cek persis sama dengan '1.zip', '2.zip', dll. (Bukan substring)
         if f_name in TARGET_SM:
             print(f"--> Mengunduh target: {f_name} (ID: {f_id})...")
             
