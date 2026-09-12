@@ -1,9 +1,7 @@
 name: "sm2m"
 
 on:
-  workflow_dispatch:
-  repository_dispatch:
-    types: [trigger-next]
+  workflow_dispatch: # Hanya bisa dijalankan manual via tab Actions
 
 concurrency:
   group: emjuh-workflow-lock
@@ -48,43 +46,6 @@ jobs:
         DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FILE_ID }}
         TARGET_ACCOUNT: ${{ matrix.target }}
       run: python download_drive.py
-
-    # TRIGGER DITERAPKAN DI LANGKAH TERAKHIR & DI-RUN OLEH SCRIPT TERPISAH
-    - name: Trigger Next Workflow Run
-      if: matrix.target == '11'
-      env:
-        GH_TOKEN: ${{ secrets.MY_PAT }}
-      run: |
-        node -e "
-        const https = require('https');
-        
-        console.log('[+] Memulai countdown 60 detik...');
-        setTimeout(() => {
-          const repo = process.env.GITHUB_REPOSITORY;
-          // Tembak langsung ke nama file run.yml (bukan emjuh.yml)
-          const options = {
-            hostname: 'api.github.com',
-            path: '/repos/' + repo + '/actions/workflows/run.yml/dispatches',
-            method: 'POST',
-            headers: {
-              'User-Agent': 'Nodejs-Trigger',
-              'Authorization': 'Bearer ' + process.env.GH_TOKEN,
-              'Accept': 'application/vnd.github+json',
-              'Content-Type': 'application/json'
-            }
-          };
-
-          const req = https.request(options, (res) => {
-            console.log('[ SUCCESS ] Trigger Terkirim! Status:', res.statusCode);
-          });
-
-          req.on('error', (e) => console.error('[ ERROR ] Gagal:', e));
-          req.write(JSON.stringify({ ref: 'main' }));
-          req.end();
-        }, 60000);
-        " &
-        # Simpan PID proses agar step tidak langsung exit dan mematikan timer
-        sleep 62
 
     - name: Run All Subfolder Bots In Parallel
       run: |
