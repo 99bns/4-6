@@ -43,14 +43,14 @@ jobs:
 
     - name: Setup & Mount Folder SF (Real-time Stream)
       run: |
-        mkdir -p ~/.config/rclone
-        echo '${{ secrets.GCP_SA_KEY }}' > ~/.config/rclone/sa.json
+        mkdir -p /home/runner/.config/rclone
+        echo '${{ secrets.GCP_SA_KEY }}' > /home/runner/.config/rclone/sa.json
         
-        cat <<EOF > ~/.config/rclone/rclone.conf
+        cat <<EOF > /home/runner/.config/rclone/rclone.conf
         [gdrive]
         type = drive
         scope = drive
-        service_account_credentials = ~/.config/rclone/sa.json
+        service_account_credentials = /home/runner/.config/rclone/sa.json
         root_folder_id = ${{ secrets.DRIVE_FILE_ID }}
         EOF
 
