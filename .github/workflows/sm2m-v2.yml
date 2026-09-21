@@ -44,7 +44,7 @@ jobs:
     - name: Setup & Mount Folder SF (Real-time Stream)
       run: |
         mkdir -p /home/runner/.config/rclone
-        echo '${{ secrets.GCP_SA_KEY }}' > /home/runner/.config/rclone/sa.json
+        printf '%s' "${{ secrets.GCP_SA_KEY }}" > /home/runner/.config/rclone/sa.json
         
         cat <<EOF > /home/runner/.config/rclone/rclone.conf
         [gdrive]
