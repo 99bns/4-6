@@ -41,22 +41,49 @@ jobs:
         pip install requests selenium selenium-stealth colorama certifi urllib3
 
     - name: Setup & Mount Folder SF
+      env:
+        GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        DRIVE_FILE_ID: ${{ secrets.DRIVE_FILE_ID }}
       run: |
         mkdir -p /home/runner/.config/rclone
-        
-        # Tulis JSON SA langsung
-        cat << 'EOF' > /home/runner/.config/rclone/sa.json
-        ${{ secrets.GCP_SA_KEY }}
-        EOF
 
-        # Tulis Rclone Config langsung
-        cat << 'EOF' > /home/runner/.config/rclone/rclone.conf
-        [gdrive]
-        type = drive
-        scope = drive
-        service_account_credentials = /home/runner/.config/rclone/sa.json
-        root_folder_id = ${{ secrets.DRIVE_FILE_ID }}
-        EOF
+        python3 -c "
+        import os, json, re
+
+        raw_key = os.environ.get('GCP_SA_KEY', '').strip()
+
+        # 1. Parse JSON
+        try:
+            data = json.loads(raw_key)
+        except Exception:
+            # Jika ada \n ter-escape ganda, ganti ke enter asli
+            raw_key_fixed = raw_key.replace('\\\\n', '\n')
+            data = json.loads(raw_key_fixed)
+
+        # 2. Perbaiki private_key jika masih mengandung karakter \n teks biasa
+        if 'private_key' in data and '\\n' in data['private_key']:
+            data['private_key'] = data['private_key'].replace('\\n', '\n')
+
+        sa_path = '/home/runner/.config/rclone/sa.json'
+        with open(sa_path, 'w') as f:
+            json.dump(data, f)
+
+        # 3. Clean DRIVE_FILE_ID (Otomatis ambil ID dari link URL Drive)
+        raw_id = os.environ.get('DRIVE_FILE_ID', '').strip()
+        match = re.search(r'([a-zA-Z0-9_-]{25,})', raw_id)
+        clean_id = match.group(1) if match else raw_id
+
+        rclone_conf = f'''[gdrive]
+type = drive
+scope = drive
+service_account_credentials = {sa_path}
+root_folder_id = {clean_id}
+'''
+        with open('/home/runner/.config/rclone/rclone.conf', 'w') as f:
+            f.write(rclone_conf)
+
+        print('[+] Berhasil memperbaiki private_key & membuat sa.json valid!')
+        "
 
         mkdir -p ./drive_sf
         rclone mount gdrive: ./drive_sf --vfs-cache-mode writes --allow-other --daemon
