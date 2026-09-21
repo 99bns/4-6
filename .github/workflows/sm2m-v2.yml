@@ -47,27 +47,32 @@ jobs:
       run: |
         mkdir -p /home/runner/.config/rclone
 
-        # Decodes Base64 atau Tulis Langsung jika sudah mentah
         python3 -c "
-        import os, base64, json, re
+        import os, json, re, sys
 
         raw_key = os.environ.get('GCP_SA_KEY', '').strip()
         sa_path = '/home/runner/.config/rclone/sa.json'
 
-        # Coba decode jika bentuknya base64
-        try:
-            decoded = base64.b64decode(raw_key).decode('utf-8')
-            json.loads(decoded) # Validasi JSON
-            with open(sa_path, 'w') as f:
-                f.write(decoded)
-            print('[+] SA Key berhasil di-decode dari Base64.')
-        except Exception:
-            # Jika bukan Base64, tulis langsung
-            with open(sa_path, 'w') as f:
-                f.write(raw_key)
-            print('[+] SA Key ditulis langsung.')
+        print('===> [DEBUG] Mengecek format GCP_SA_KEY...')
+        
+        # Validasi 1: Cek apakah Secret GCP_SA_KEY berisi Path bukannya JSON
+        if raw_key.startswith('/'):
+            print(f'[!] ERROR PARSING: GCP_SA_KEY terdeteksi berisi PATH/STRING ({raw_key[:20]}...), bukan isi file JSON!')
+            print('[!] Harap buka Settings > Secrets > GCP_SA_KEY, hapus runs/path-nya, lalu PASTE SELURUH ISI FILE JSON-nya.')
+            sys.exit(1)
 
-        # Ambil Clean Drive ID
+        # Validasi 2: Parse JSON
+        try:
+            parsed_json = json.loads(raw_key)
+            with open(sa_path, 'w') as f:
+                json.dump(parsed_json, f)
+            print('[+] BERHASIL: sa.json valid dan berhasil ditulis.')
+        except Exception as e:
+            print(f'[!] ERROR JSON PARSE: {e}')
+            print(f'[!] 50 karakter pertama dari GCP_SA_KEY: {repr(raw_key[:50])}')
+            sys.exit(1)
+
+        # Clean DRIVE_FILE_ID
         raw_id = os.environ.get('DRIVE_FILE_ID', '').strip()
         match = re.search(r'([a-zA-Z0-9_-]{25,})', raw_id)
         clean_id = match.group(1) if match else raw_id
@@ -80,11 +85,9 @@ root_folder_id = {clean_id}
 '''
         with open('/home/runner/.config/rclone/rclone.conf', 'w') as f:
             f.write(rclone_conf)
+            
+        print(f'[+] Config Rclone beres dengan Root ID: {clean_id}')
         "
-
-        # Debugging singkat untuk memastikan file sa.json bukan kosong/HTML
-        echo "=== Cek Baris Pertama sa.json ==="
-        head -n 2 /home/runner/.config/rclone/sa.json
 
         mkdir -p ./drive_sf
         rclone mount gdrive: ./drive_sf --vfs-cache-mode writes --allow-other --daemon
