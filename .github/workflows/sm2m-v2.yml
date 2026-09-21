@@ -43,33 +43,32 @@ jobs:
 
     - name: Setup & Mount Folder SF (Real-time Stream)
       env:
-        SA_KEY: ${{ secrets.GCP_SA_KEY }}
-        FOLDER_ID_RAW: ${{ secrets.DRIVE_FILE_ID }}
+        GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        DRIVE_FILE_ID: ${{ secrets.DRIVE_FILE_ID }}
       run: |
         mkdir -p /home/runner/.config/rclone
-        
+
         python3 -c "
         import os, json, re
 
-        # 1. Olah dan Simpan SA Key
-        raw_key = os.environ.get('SA_KEY', '')
-        data = json.loads(raw_key)
-        with open('/home/runner/.config/rclone/sa.json', 'w') as f:
-            json.dump(data, f)
+        # 1. Tulis sa.json secara MENTAH (mencegah eror escape slash / character)
+        raw_key = os.environ.get('GCP_SA_KEY', '')
+        try:
+            # Jika ter-escape, parse dulu baru dump
+            parsed_key = json.loads(raw_key)
+            with open('/home/runner/.config/rclone/sa.json', 'w') as f:
+                json.dump(parsed_key, f)
+        except Exception:
+            # Jika mentah, tulis langsung
+            with open('/home/runner/.config/rclone/sa.json', 'w') as f:
+                f.write(raw_key)
 
-        # 2. Ekstrak Folder ID (Mendukung URL lengkap maupun ID murni)
-        raw_id = os.environ.get('FOLDER_ID_RAW', '').strip()
+        # 2. Extract Folder ID bersih dari secret DRIVE_FILE_ID
+        raw_id = os.environ.get('DRIVE_FILE_ID', '').strip()
+        match = re.search(r'([a-zA-Z0-9_-]{25,})', raw_id)
+        clean_id = match.group(1) if match else raw_id
 
-        if 'drive.google.com' in raw_id or '/' in raw_id:
-            match = re.search(r'folders/([a-zA-Z0-9_-]+)', raw_id)
-            if match:
-                clean_id = match.group(1)
-            else:
-                clean_id = raw_id.split('/')[-1].split('?')[0]
-        else:
-            clean_id = raw_id
-
-        # 3. Tulis Konfigurasi Rclone
+        # 3. Buat rclone.conf
         rclone_conf = f'''[gdrive]
 type = drive
 scope = drive
@@ -79,7 +78,7 @@ root_folder_id = {clean_id}
         with open('/home/runner/.config/rclone/rclone.conf', 'w') as f:
             f.write(rclone_conf)
 
-        print(f'[+] Config Rclone berhasil dibuat dengan Root Folder ID: {clean_id}')
+        print(f'[+] Config Rclone beres! Root ID: {clean_id}')
         "
 
         mkdir -p ./drive_sf
