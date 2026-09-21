@@ -3,31 +3,87 @@ name: "sm2m-v2"
 on:
   workflow_dispatch:
 
+
+# ============================================================
+# CONCURRENCY
+# ============================================================
+#
+# Hanya 1 workflow yang boleh aktif.
+# Workflow berikutnya akan menunggu (pending).
+#
+# Pola:
+#
+# RUN A aktif
+# RUN B pending
+#
+# RUN A cancel
+# RUN B aktif
+#
+# ============================================================
+
 concurrency:
   group: emjuh-workflow-lock
   cancel-in-progress: false
 
+
 jobs:
+
   run:
+
     runs-on: ubuntu-latest
+
+    # ========================================================
+    # BATAS MAKSIMAL JOB
+    # ========================================================
+    #
+    # 330 menit = 5 jam 30 menit
+    #
+    # Jangan dibuat 360 karena kita membutuhkan waktu
+    # untuk melakukan handover sebelum job timeout.
+    #
+    # ========================================================
+
     timeout-minutes: 330
 
+
     permissions:
+
+      # Dibutuhkan agar workflow dapat:
+      # - re-run workflow lain
+      # - cancel workflow sendiri
+
       actions: write
+
       contents: read
 
+
     strategy:
+
       fail-fast: false
+
       matrix:
-        target: ['71', '71b', '72', '73', '74', '75', '76', '77', '78']
+
+        target:
+          - '71'
+          - '71b'
+          - '72'
+          - '73'
+          - '74'
+          - '75'
+          - '76'
+          - '77'
+          - '78'
+
 
     steps:
+
 
     # ============================================================
     # CHECKOUT
     # ============================================================
 
     - name: Checkout Repository
+
       uses: actions/checkout@v4
 
 
@@ -36,8 +92,11 @@ jobs:
     # ============================================================
 
     - name: Set up Python
+
       uses: actions/setup-python@v5
+
       with:
+
         python-version: '3.10'
 
 
@@ -46,28 +105,70 @@ jobs:
     # ============================================================
 
     - name: Install Google Chrome & Rclone System
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y wget curl rclone fuse3
 
-        # Chrome biasanya sudah tersedia di runner GitHub
-        # Jika belum ada, install manual
+      run: |
+
+        set -e
+
+
+        sudo apt-get update
+
+
+        sudo apt-get install -y \
+          wget \
+          curl \
+          rclone \
+          fuse3
+
+
+        # ======================================================
+        # CEK GOOGLE CHROME
+        # ======================================================
+
         if ! command -v google-chrome >/dev/null 2>&1; then
-          wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-          sudo apt-get install -y ./google-chrome-stable_current_amd64.deb
+
+          echo ""
+          echo "Chrome belum tersedia."
+          echo "Install Google Chrome..."
+          echo ""
+
+          wget -q \
+            https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+
+          sudo apt-get install -y \
+            ./google-chrome-stable_current_amd64.deb
+
         fi
 
-        # Hapus chromedriver bawaan jika ada
+
+        # ======================================================
+        # HAPUS CHROMEDRIVER BAWAAN
+        # ======================================================
+
         sudo rm -f /usr/bin/chromedriver
 
+
+        # ======================================================
+        # INFORMASI
+        # ======================================================
+
+        echo ""
         echo "========================================"
         echo "Chrome:"
+        echo "========================================"
+
         google-chrome --version || true
 
+
+        echo ""
         echo "========================================"
         echo "Rclone:"
+        echo "========================================"
+
         rclone version
 
+
+        echo ""
         echo "========================================"
 
 
@@ -76,8 +177,14 @@ jobs:
     # ============================================================
 
     - name: Install Python Packages
+
       run: |
+
+        set -e
+
+
         python -m pip install --upgrade pip
+
 
         pip install \
           requests \
@@ -89,203 +196,410 @@ jobs:
 
 
     # ============================================================
-    # SETUP RCLONE
+    # SETUP RCLONE GOOGLE DRIVE
     # ============================================================
 
     - name: Setup Rclone Google Drive
+
       env:
+
         RAW_GCP_KEY: ${{ secrets.GCP_SA_KEY }}
+
         RAW_DRIVE_ID: ${{ secrets.DRIVE_FILE_ID }}
 
+
       run: |
+
         set -e
+
+
+        # ======================================================
+        # BUAT CONFIG DIRECTORY
+        # ======================================================
 
         mkdir -p /home/runner/.config/rclone
 
+
+        echo ""
         echo "========================================"
         echo "Membuat Service Account JSON..."
         echo "========================================"
 
-        # Base64 dipakai agar isi secret tetap utuh
-        printf '%s' "$RAW_GCP_KEY" | base64 -w 0 > /tmp/sa_b64.txt
+
+        # ======================================================
+        # BASE64 SERVICE ACCOUNT
+        # ======================================================
+        #
+        # Dipakai agar isi secret tetap utuh.
+        #
+        # ======================================================
+
+        printf '%s' "$RAW_GCP_KEY" \
+          | base64 -w 0 \
+          > /tmp/sa_b64.txt
+
 
         python3 <<'PYTHON'
-        import base64
-        import json
-        import os
-        import re
-        import sys
 
-        # ========================================================
-        # READ SERVICE ACCOUNT SECRET
-        # ========================================================
-
-        with open('/tmp/sa_b64.txt', 'r', encoding='utf-8') as f:
-            b64_str = f.read().strip()
-
-        if not b64_str:
-            print("[!] ERROR: GCP_SA_KEY kosong!")
-            sys.exit(1)
-
-        try:
-            raw_json_bytes = base64.b64decode(b64_str)
-            raw_json_str = raw_json_bytes.decode('utf-8')
-        except Exception as e:
-            print(f"[!] ERROR decode secret: {e}")
-            sys.exit(1)
+import base64
+import json
+import os
+import re
+import sys
 
 
-        # ========================================================
-        # PARSE JSON
-        # ========================================================
+# ============================================================
+# READ SERVICE ACCOUNT SECRET
+# ============================================================
 
-        try:
-            data = json.loads(raw_json_str)
+with open(
+    "/tmp/sa_b64.txt",
+    "r",
+    encoding="utf-8"
+) as f:
 
-        except json.JSONDecodeError:
-
-            # Coba repair jika newline private key berubah
-            try:
-                repaired = raw_json_str.replace('\\\\n', '\\n')
-                data = json.loads(repaired)
-
-            except Exception as e:
-                print("[!] ERROR: GCP_SA_KEY bukan JSON valid!")
-                print(f"[!] Detail: {e}")
-                sys.exit(1)
+    b64_str = f.read().strip()
 
 
-        # ========================================================
-        # VALIDATE SERVICE ACCOUNT
-        # ========================================================
+if not b64_str:
 
-        required_fields = [
-            "type",
-            "project_id",
-            "private_key",
-            "client_email"
-        ]
+    print(
+        "[!] ERROR: GCP_SA_KEY kosong!"
+    )
 
-        for field in required_fields:
-            if field not in data:
-                print(f"[!] ERROR: Field '{field}' tidak ditemukan di GCP_SA_KEY")
-                sys.exit(1)
+    sys.exit(1)
 
 
-        if data.get("type") != "service_account":
-            print("[!] ERROR: JSON bukan Service Account!")
-            sys.exit(1)
+# ============================================================
+# DECODE BASE64
+# ============================================================
+
+try:
+
+    raw_json_bytes = base64.b64decode(
+        b64_str
+    )
+
+    raw_json_str = raw_json_bytes.decode(
+        "utf-8"
+    )
+
+except Exception as e:
+
+    print(
+        f"[!] ERROR decode secret: {e}"
+    )
+
+    sys.exit(1)
 
 
-        # Repair private key newline jika diperlukan
-        if "\\n" in data["private_key"]:
-            data["private_key"] = data["private_key"].replace("\\n", "\n")
+# ============================================================
+# PARSE JSON
+# ============================================================
+
+try:
+
+    data = json.loads(
+        raw_json_str
+    )
 
 
-        # ========================================================
-        # SAVE SERVICE ACCOUNT
-        # ========================================================
+except json.JSONDecodeError:
 
-        sa_path = "/home/runner/.config/rclone/sa.json"
+    # ========================================================
+    # COBA REPAIR PRIVATE KEY
+    # ========================================================
 
-        with open(sa_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
+    try:
 
+        repaired = raw_json_str.replace(
+            "\\\\n",
+            "\\n"
+        )
 
-        # ========================================================
-        # DRIVE ROOT FOLDER ID
-        # ========================================================
-
-        raw_id = os.environ.get("RAW_DRIVE_ID", "").strip()
-
-        if not raw_id:
-            print("[!] ERROR: DRIVE_FILE_ID kosong!")
-            sys.exit(1)
+        data = json.loads(
+            repaired
+        )
 
 
-        # Support:
-        #
-        # 1. ID langsung
-        # 2. https://drive.google.com/drive/folders/XXXXX
-        # 3. https://drive.google.com/open?id=XXXXX
-        #
+    except Exception as e:
 
-        if "/folders/" in raw_id:
+        print(
+            "[!] ERROR: GCP_SA_KEY bukan JSON valid!"
+        )
 
-            clean_id = raw_id.split("/folders/", 1)[1]
-            clean_id = clean_id.split("?")[0]
-            clean_id = clean_id.split("/")[0]
+        print(
+            f"[!] Detail: {e}"
+        )
 
-        elif "id=" in raw_id:
-
-            match = re.search(r"[?&]id=([^&]+)", raw_id)
-
-            if match:
-                clean_id = match.group(1)
-            else:
-                clean_id = raw_id
-
-        else:
-
-            clean_id = raw_id
-            clean_id = clean_id.split("?")[0]
-            clean_id = clean_id.rstrip("/")
+        sys.exit(1)
 
 
-        clean_id = clean_id.strip()
+# ============================================================
+# VALIDATE SERVICE ACCOUNT
+# ============================================================
+
+required_fields = [
+
+    "type",
+    "project_id",
+    "private_key",
+    "client_email"
+
+]
 
 
-        if not clean_id:
-            print("[!] ERROR: Tidak bisa membaca DRIVE_FILE_ID!")
-            sys.exit(1)
+for field in required_fields:
+
+    if field not in data:
+
+        print(
+            f"[!] ERROR: Field '{field}' "
+            "tidak ditemukan di GCP_SA_KEY"
+        )
+
+        sys.exit(1)
 
 
-        # ========================================================
-        # CREATE RCLONE CONFIG
-        # ========================================================
+# ============================================================
+# CHECK TYPE
+# ============================================================
 
-        rclone_conf = f"""[gdrive]
-        type = drive
-        scope = drive
-        service_account_file = {sa_path}
-        root_folder_id = {clean_id}
-        """
+if data.get("type") != "service_account":
 
+    print(
+        "[!] ERROR: JSON bukan Service Account!"
+    )
 
-        config_path = "/home/runner/.config/rclone/rclone.conf"
-
-        with open(config_path, "w", encoding="utf-8") as f:
-            f.write(rclone_conf)
+    sys.exit(1)
 
 
-        print("[+] Service Account OK")
-        print("[+] sa.json berhasil dibuat")
-        print("[+] rclone.conf berhasil dibuat")
-        print(f"[+] Project ID : {data.get('project_id')}")
-        print(f"[+] Client Email: {data.get('client_email')}")
-        print(f"[+] Drive Root ID: {clean_id}")
+# ============================================================
+# REPAIR PRIVATE KEY NEWLINE
+# ============================================================
 
-        PYTHON
+if "\\n" in data["private_key"]:
+
+    data["private_key"] = data[
+        "private_key"
+    ].replace(
+        "\\n",
+        "\n"
+    )
 
 
-        # Security permission
-        chmod 600 /home/runner/.config/rclone/sa.json
-        chmod 600 /home/runner/.config/rclone/rclone.conf
+# ============================================================
+# SAVE SERVICE ACCOUNT
+# ============================================================
 
+sa_path = (
+    "/home/runner/.config/rclone/sa.json"
+)
+
+
+with open(
+    sa_path,
+    "w",
+    encoding="utf-8"
+) as f:
+
+    json.dump(
+        data,
+        f,
+        indent=2
+    )
+
+
+# ============================================================
+# DRIVE ROOT FOLDER ID
+# ============================================================
+
+raw_id = os.environ.get(
+    "RAW_DRIVE_ID",
+    ""
+).strip()
+
+
+if not raw_id:
+
+    print(
+        "[!] ERROR: DRIVE_FILE_ID kosong!"
+    )
+
+    sys.exit(1)
+
+
+# ============================================================
+# SUPPORT DRIVE ID FORMAT
+# ============================================================
+#
+# 1. ID langsung
+#
+# 2. https://drive.google.com/drive/folders/XXXXX
+#
+# 3. https://drive.google.com/open?id=XXXXX
+#
+# ============================================================
+
+if "/folders/" in raw_id:
+
+    clean_id = raw_id.split(
+        "/folders/",
+        1
+    )[1]
+
+    clean_id = clean_id.split(
+        "?",
+        1
+    )[0]
+
+    clean_id = clean_id.split(
+        "/",
+        1
+    )[0]
+
+
+elif "id=" in raw_id:
+
+    match = re.search(
+        r"[?&]id=([^&]+)",
+        raw_id
+    )
+
+    if match:
+
+        clean_id = match.group(1)
+
+    else:
+
+        clean_id = raw_id
+
+
+else:
+
+    clean_id = raw_id
+
+    clean_id = clean_id.split(
+        "?",
+        1
+    )[0]
+
+    clean_id = clean_id.rstrip("/")
+
+
+clean_id = clean_id.strip()
+
+
+# ============================================================
+# VALIDATE DRIVE ID
+# ============================================================
+
+if not clean_id:
+
+    print(
+        "[!] ERROR: Tidak bisa membaca DRIVE_FILE_ID!"
+    )
+
+    sys.exit(1)
+
+
+# ============================================================
+# CREATE RCLONE CONFIG
+# ============================================================
+
+rclone_conf = f"""[gdrive]
+type = drive
+scope = drive
+service_account_file = {sa_path}
+root_folder_id = {clean_id}
+"""
+
+
+config_path = (
+    "/home/runner/.config/rclone/rclone.conf"
+)
+
+
+with open(
+    config_path,
+    "w",
+    encoding="utf-8"
+) as f:
+
+    f.write(
+        rclone_conf
+    )
+
+
+# ============================================================
+# INFO
+# ============================================================
+
+print(
+    "[+] Service Account OK"
+)
+
+print(
+    "[+] sa.json berhasil dibuat"
+)
+
+print(
+    "[+] rclone.conf berhasil dibuat"
+)
+
+print(
+    f"[+] Project ID : "
+    f"{data.get('project_id')}"
+)
+
+print(
+    f"[+] Client Email: "
+    f"{data.get('client_email')}"
+)
+
+print(
+    f"[+] Drive Root ID: "
+    f"{clean_id}"
+)
+
+PYTHON
+
+
+        # ======================================================
+        # SECURITY
+        # ======================================================
+
+        chmod 600 \
+          /home/runner/.config/rclone/sa.json
+
+
+        chmod 600 \
+          /home/runner/.config/rclone/rclone.conf
+
+
+        # ======================================================
+        # TEST RCLONE
+        # ======================================================
 
         echo ""
         echo "========================================"
         echo "TEST RCLONE CONFIG"
         echo "========================================"
 
+
         rclone listremotes
+
 
         echo ""
         echo "========================================"
         echo "TEST GOOGLE DRIVE CONNECTION"
         echo "========================================"
 
-        rclone lsd gdrive: --max-depth 1
+
+        rclone lsd \
+          gdrive: \
+          --max-depth 1
+
 
         echo ""
         echo "[+] Google Drive connection BERHASIL"
@@ -296,29 +610,51 @@ jobs:
     # ============================================================
 
     - name: Mount Folder SF
+
       run: |
+
         set -e
+
+
+        # ======================================================
+        # BUAT MOUNT DIRECTORY
+        # ======================================================
 
         mkdir -p ./drive_sf
 
+
+        echo ""
         echo "========================================"
         echo "Mount Google Drive..."
         echo "========================================"
 
-        rclone mount gdrive: ./drive_sf \
+
+        # ======================================================
+        # RCLONE MOUNT
+        # ======================================================
+
+        rclone mount \
+          gdrive: \
+          ./drive_sf \
           --vfs-cache-mode writes \
           --vfs-cache-max-size 2G \
           --dir-cache-time 5m \
           --poll-interval 30s \
           --daemon
 
+
         sleep 5
 
+
+        # ======================================================
+        # CHECK MOUNT
+        # ======================================================
 
         echo ""
         echo "========================================"
         echo "CHECK MOUNT"
         echo "========================================"
+
 
         if mountpoint -q ./drive_sf; then
 
@@ -327,133 +663,735 @@ jobs:
         else
 
           echo "[!] ERROR: Google Drive gagal di-mount!"
+
           exit 1
 
         fi
 
 
+        # ======================================================
+        # LIST FOLDER
+        # ======================================================
+
         echo ""
         echo "Isi folder:"
+
+
         ls -lah ./drive_sf
 
 
     # ============================================================
     # RUN BOTS
     # ============================================================
+    #
+    # BOT BERJALAN 320 MENIT.
+    #
+    # Kenapa bukan 330?
+    #
+    # Karena timeout job = 330 menit.
+    #
+    # Kita membutuhkan beberapa menit terakhir untuk:
+    #
+    # 1. stop bot
+    # 2. re-run runner berikutnya
+    # 3. cancel runner sekarang
+    #
+    # ============================================================
 
     - name: Run All Subfolder Bots In Parallel
+
+      env:
+
+        BOT_RUNTIME_MINUTES: "320"
+
+
       run: |
 
         python3 <<'PYTHON'
 
-        import os
-        import subprocess
-        import sys
+import os
+import signal
+import subprocess
+import sys
+import time
 
 
-        target = "${{ matrix.target }}"
+# ============================================================
+# CONFIG
+# ============================================================
 
-        target_dir = os.path.join(
-            "./drive_sf",
-            target
-        )
-
-
-        print("=" * 60)
-        print(f"TARGET MATRIX : {target}")
-        print(f"TARGET FOLDER : {target_dir}")
-        print("=" * 60)
+target = "${{ matrix.target }}"
 
 
-        processes = []
+target_dir = os.path.join(
+    "./drive_sf",
+    target
+)
 
 
-        def run_bot_loop(bot_dir):
-
-            cmd = (
-                'while true; do '
-                'python3 sm.py; '
-                'EXIT_CODE=$?; '
-                f'echo "[!] Bot di {bot_dir} berhenti dengan code $EXIT_CODE"; '
-                'echo "[!] Restart dalam 5 detik..."; '
-                'sleep 5; '
-                'done'
-            )
-
-            return subprocess.Popen(
-                cmd,
-                shell=True,
-                cwd=bot_dir,
-                executable="/bin/bash"
-            )
+runtime_minutes = int(
+    os.environ.get(
+        "BOT_RUNTIME_MINUTES",
+        "320"
+    )
+)
 
 
-        # ========================================================
-        # CHECK TARGET
-        # ========================================================
-
-        if not os.path.exists(target_dir):
-
-            print(
-                f"[!] ERROR: Folder {target_dir} "
-                "tidak ditemukan di Google Drive!"
-            )
-
-            sys.exit(1)
+runtime_seconds = (
+    runtime_minutes * 60
+)
 
 
-        # ========================================================
-        # SEARCH sm.py
-        # ========================================================
+# ============================================================
+# HEADER
+# ============================================================
 
-        for root, dirs, files in os.walk(target_dir):
+print(
+    "=" * 60
+)
 
-            if "sm.py" in files:
+print(
+    f"TARGET MATRIX : {target}"
+)
 
-                print(
-                    f"==> Menjalankan Bot Real-time di: {root}"
-                )
+print(
+    f"TARGET FOLDER : {target_dir}"
+)
 
-                process = run_bot_loop(root)
+print(
+    f"BOT RUNTIME   : {runtime_minutes} menit"
+)
 
-                processes.append(process)
-
-
-        # ========================================================
-        # CHECK BOT
-        # ========================================================
-
-        if not processes:
-
-            print(
-                f"[!] ERROR: Tidak ditemukan sm.py "
-                f"di dalam {target_dir}"
-            )
-
-            sys.exit(1)
+print(
+    "=" * 60
+)
 
 
-        print("")
+# ============================================================
+# PROCESS LIST
+# ============================================================
+
+processes = []
+
+
+# ============================================================
+# RUN BOT LOOP
+# ============================================================
+
+def run_bot_loop(bot_dir):
+
+    cmd = (
+        "while true; do "
+        "python3 sm.py; "
+        "EXIT_CODE=$?; "
+        f'echo "[!] Bot di {bot_dir} berhenti dengan code $EXIT_CODE"; '
+        'echo "[!] Restart dalam 5 detik..."; '
+        "sleep 5; "
+        "done"
+    )
+
+
+    process = subprocess.Popen(
+
+        cmd,
+
+        shell=True,
+
+        cwd=bot_dir,
+
+        executable="/bin/bash",
+
+        # ====================================================
+        # BUAT PROCESS GROUP SENDIRI
+        # ====================================================
+
+        start_new_session=True
+
+    )
+
+
+    return process
+
+
+# ============================================================
+# CHECK TARGET DIRECTORY
+# ============================================================
+
+if not os.path.exists(target_dir):
+
+    print(
+        f"[!] ERROR: Folder {target_dir} "
+        "tidak ditemukan di Google Drive!"
+    )
+
+    sys.exit(1)
+
+
+# ============================================================
+# SEARCH sm.py
+# ============================================================
+
+for root, dirs, files in os.walk(
+    target_dir
+):
+
+    if "sm.py" in files:
+
         print(
-            f"[+] Total bot berjalan: {len(processes)}"
+            f"==> Menjalankan Bot Real-time di: {root}"
         )
-        print("")
 
 
-        # ========================================================
-        # WAIT
-        # ========================================================
+        process = run_bot_loop(
+            root
+        )
 
-        try:
 
-            for process in processes:
-                process.wait()
+        processes.append(
+            process
+        )
 
-        except KeyboardInterrupt:
 
-            print("[!] Workflow dihentikan")
+# ============================================================
+# CHECK BOT
+# ============================================================
 
-            for process in processes:
-                process.terminate()
+if not processes:
 
-        PYTHON
+    print(
+        f"[!] ERROR: Tidak ditemukan sm.py "
+        f"di dalam {target_dir}"
+    )
+
+    sys.exit(1)
+
+
+# ============================================================
+# INFO
+# ============================================================
+
+print("")
+
+print(
+    f"[+] Total bot berjalan: "
+    f"{len(processes)}"
+)
+
+print("")
+
+print(
+    f"[+] Bot akan berjalan selama "
+    f"{runtime_minutes} menit."
+)
+
+print("")
+
+
+# ============================================================
+# TIMER
+# ============================================================
+
+start_time = time.monotonic()
+
+
+deadline = (
+    start_time +
+    runtime_seconds
+)
+
+
+# ============================================================
+# WAIT UNTIL DEADLINE
+# ============================================================
+
+try:
+
+    while True:
+
+        now = time.monotonic()
+
+
+        remaining = (
+            deadline - now
+        )
+
+
+        if remaining <= 0:
+
+            break
+
+
+        # ====================================================
+        # CHECK PROCESS
+        # ====================================================
+
+        alive_count = 0
+
+
+        for process in processes:
+
+            if process.poll() is None:
+
+                alive_count += 1
+
+
+        if alive_count == 0:
+
+            print(
+                "[!] Semua bot process berhenti!"
+            )
+
+            break
+
+
+        # ====================================================
+        # SLEEP
+        # ====================================================
+
+        sleep_time = min(
+            60,
+            remaining
+        )
+
+
+        time.sleep(
+            sleep_time
+        )
+
+
+except KeyboardInterrupt:
+
+    print(
+        "[!] Workflow dihentikan."
+    )
+
+
+# ============================================================
+# STOP ALL BOT PROCESS GROUPS
+# ============================================================
+
+print("")
+
+print(
+    "=" * 60
+)
+
+print(
+    "[+] Waktu bot selesai."
+)
+
+print(
+    "[+] Menghentikan semua bot..."
+)
+
+print(
+    "=" * 60
+)
+
+
+for process in processes:
+
+    try:
+
+        if process.poll() is None:
+
+            # =================================================
+            # STOP SELURUH PROCESS GROUP
+            # =================================================
+
+            os.killpg(
+                os.getpgid(process.pid),
+                signal.SIGTERM
+            )
+
+
+    except Exception as e:
+
+        print(
+            f"[!] Gagal TERM process "
+            f"{process.pid}: {e}"
+        )
+
+
+# ============================================================
+# WAIT
+# ============================================================
+
+time.sleep(5)
+
+
+# ============================================================
+# FORCE KILL
+# ============================================================
+
+for process in processes:
+
+    try:
+
+        if process.poll() is None:
+
+            print(
+                f"[!] Process {process.pid} "
+                "masih hidup."
+            )
+
+
+            print(
+                "[!] Force kill process group..."
+            )
+
+
+            os.killpg(
+                os.getpgid(process.pid),
+                signal.SIGKILL
+            )
+
+
+    except Exception as e:
+
+        print(
+            f"[!] Gagal KILL process "
+            f"{process.pid}: {e}"
+        )
+
+
+print("")
+
+print(
+    "[+] Semua bot sudah dihentikan."
+)
+
+print("")
+
+
+PYTHON
+
+
+    # ============================================================
+    # HANDOVER A <-> B
+    # ============================================================
+    #
+    # RUN A:
+    # 35608618006
+    #
+    # RUN B:
+    # 35609870391
+    #
+    # HANYA MATRIX 71 YANG MENJALANKAN HANDOVER.
+    #
+    # ============================================================
+
+    - name: Handover To Other Existing Run
+
+      if: ${{ matrix.target == '71' }}
+
+      env:
+
+        GH_TOKEN: ${{ github.token }}
+
+        RUN_A_ID: "35608618006"
+
+        RUN_B_ID: "35609870391"
+
+
+      run: |
+
+        set -e
+
+
+        echo ""
+        echo "============================================================"
+        echo "                    RUNNER HANDOVER"
+        echo "============================================================"
+
+
+        CURRENT_RUN_ID="${{ github.run_id }}"
+
+
+        echo "[+] Repository : $GITHUB_REPOSITORY"
+        echo "[+] Current Run: $CURRENT_RUN_ID"
+        echo "[+] Run A      : $RUN_A_ID"
+        echo "[+] Run B      : $RUN_B_ID"
+        echo ""
+
+
+        # ======================================================
+        # TENTUKAN TARGET
+        # ======================================================
+
+        if [ "$CURRENT_RUN_ID" = "$RUN_A_ID" ]; then
+
+          TARGET_RUN_ID="$RUN_B_ID"
+
+          echo "[+] Current : RUN A"
+          echo "[+] Target  : RUN B"
+
+
+        elif [ "$CURRENT_RUN_ID" = "$RUN_B_ID" ]; then
+
+          TARGET_RUN_ID="$RUN_A_ID"
+
+          echo "[+] Current : RUN B"
+          echo "[+] Target  : RUN A"
+
+
+        else
+
+          echo ""
+          echo "[!] ERROR:"
+          echo "[!] Run ini bukan RUN A atau RUN B."
+          echo ""
+          echo "[!] Current Run ID : $CURRENT_RUN_ID"
+          echo "[!] RUN A ID       : $RUN_A_ID"
+          echo "[!] RUN B ID       : $RUN_B_ID"
+          echo ""
+
+          exit 1
+
+        fi
+
+
+        # ======================================================
+        # CHECK TARGET RUN
+        # ======================================================
+
+        echo ""
+        echo "============================================================"
+        echo "CHECK TARGET RUN"
+        echo "============================================================"
+
+
+        TARGET_INFO=$(
+
+          gh api \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$TARGET_RUN_ID"
+
+        )
+
+
+        TARGET_RUN_NUMBER=$(
+
+          echo "$TARGET_INFO" \
+          | python3 -c \
+            'import sys,json; print(json.load(sys.stdin)["run_number"])'
+
+        )
+
+
+        TARGET_STATUS=$(
+
+          echo "$TARGET_INFO" \
+          | python3 -c \
+            'import sys,json; print(json.load(sys.stdin)["status"])'
+
+        )
+
+
+        TARGET_CONCLUSION=$(
+
+          echo "$TARGET_INFO" \
+          | python3 -c \
+            'import sys,json; print(json.load(sys.stdin).get("conclusion") or "")'
+
+        )
+
+
+        echo "[+] Target Run ID : $TARGET_RUN_ID"
+        echo "[+] Target Run #  : $TARGET_RUN_NUMBER"
+        echo "[+] Status        : $TARGET_STATUS"
+        echo "[+] Conclusion    : $TARGET_CONCLUSION"
+
+
+        # ======================================================
+        # TARGET MASIH ACTIVE
+        # ======================================================
+
+        if [ "$TARGET_STATUS" = "in_progress" ]; then
+
+          echo ""
+          echo "[!] Target run masih aktif."
+          echo "[!] Handover dibatalkan."
+
+          exit 1
+
+        fi
+
+
+        # ======================================================
+        # TARGET SUDAH QUEUED
+        # ======================================================
+
+        if [ "$TARGET_STATUS" = "queued" ]; then
+
+          echo ""
+          echo "[!] Target run sudah queued."
+          echo "[!] Handover dibatalkan."
+
+          exit 1
+
+        fi
+
+
+        # ======================================================
+        # TARGET SUDAH PENDING
+        # ======================================================
+
+        if [ "$TARGET_STATUS" = "pending" ]; then
+
+          echo ""
+          echo "[!] Target run sudah pending."
+          echo "[!] Tidak melakukan re-run kedua."
+
+          exit 1
+
+        fi
+
+
+        # ======================================================
+        # RE-RUN TARGET
+        # ======================================================
+        #
+        # PENTING:
+        #
+        # Kita TIDAK menggunakan workflow_dispatch.
+        #
+        # Kita menggunakan run_id yang sudah ada.
+        #
+        # ======================================================
+
+        echo ""
+        echo "============================================================"
+        echo "RE-RUN TARGET"
+        echo "============================================================"
+
+
+        echo "[+] Re-run Run ID: $TARGET_RUN_ID"
+
+
+        HTTP_CODE=$(
+
+          curl \
+            --silent \
+            --show-error \
+            --output /tmp/rerun_response.txt \
+            --write-out "%{http_code}" \
+            --request POST \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "X-GitHub-Api-Version: 2026-03-10" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$TARGET_RUN_ID/rerun"
+
+        )
+
+
+        echo "[+] HTTP Code: $HTTP_CODE"
+
+
+        if [ "$HTTP_CODE" != "201" ]; then
+
+          echo ""
+          echo "[!] ERROR: Gagal melakukan re-run!"
+          echo ""
+          echo "[!] Response:"
+          cat /tmp/rerun_response.txt
+          echo ""
+
+          exit 1
+
+        fi
+
+
+        echo ""
+        echo "[+] Target berhasil di-re-run."
+        echo "[+] Target sekarang menunggu concurrency."
+        echo ""
+
+
+        # ======================================================
+        # TUNGGU TARGET MASUK QUEUE
+        # ======================================================
+
+        echo "[+] Tunggu 10 detik..."
+
+        sleep 10
+
+
+        # ======================================================
+        # CEK TARGET
+        # ======================================================
+
+        TARGET_INFO_AFTER=$(
+
+          gh api \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$TARGET_RUN_ID"
+
+        )
+
+
+        TARGET_STATUS_AFTER=$(
+
+          echo "$TARGET_INFO_AFTER" \
+          | python3 -c \
+            'import sys,json; print(json.load(sys.stdin)["status"])'
+
+        )
+
+
+        echo ""
+        echo "[+] Target status: $TARGET_STATUS_AFTER"
+
+
+        # ======================================================
+        # CANCEL CURRENT RUN
+        # ======================================================
+
+        echo ""
+        echo "============================================================"
+        echo "CANCEL CURRENT RUN"
+        echo "============================================================"
+
+
+        echo "[+] Current Run ID: $CURRENT_RUN_ID"
+        echo "[+] Mengirim perintah CANCEL..."
+
+
+        CANCEL_CODE=$(
+
+          curl \
+            --silent \
+            --show-error \
+            --output /tmp/cancel_response.txt \
+            --write-out "%{http_code}" \
+            --request POST \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "X-GitHub-Api-Version: 2026-03-10" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$CURRENT_RUN_ID/cancel"
+
+        )
+
+
+        echo "[+] Cancel HTTP Code: $CANCEL_CODE"
+
+
+        if [ "$CANCEL_CODE" = "202" ]; then
+
+          echo ""
+          echo "============================================================"
+          echo "[+] CURRENT RUN BERHASIL DIMINTA CANCEL"
+          echo "============================================================"
+          echo ""
+          echo "[+] Runner berikutnya akan mengambil alih."
+          echo ""
+
+        else
+
+          echo ""
+          echo "[!] WARNING:"
+          echo "[!] Cancel tidak mengembalikan HTTP 202."
+          echo ""
+          echo "[!] Response:"
+          cat /tmp/cancel_response.txt
+          echo ""
+
+        fi
