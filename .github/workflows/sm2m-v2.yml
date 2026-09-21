@@ -17,7 +17,6 @@ jobs:
 
     strategy:
       fail-fast: false
-      # KUNCI EDIT DILAKUKAN DI SINI (Ubah nama folder di Drive sesuai kebutuhan):
       matrix:
         target: ['71', '71b']
 
@@ -48,38 +47,44 @@ jobs:
       run: |
         mkdir -p /home/runner/.config/rclone
 
+        # Decodes Base64 atau Tulis Langsung jika sudah mentah
         python3 -c "
-        import os, json, re
+        import os, base64, json, re
 
-        # 1. Tulis sa.json secara MENTAH (mencegah eror escape slash / character)
-        raw_key = os.environ.get('GCP_SA_KEY', '')
+        raw_key = os.environ.get('GCP_SA_KEY', '').strip()
+        sa_path = '/home/runner/.config/rclone/sa.json'
+
+        # Coba decode jika bentuknya base64
         try:
-            # Jika ter-escape, parse dulu baru dump
-            parsed_key = json.loads(raw_key)
-            with open('/home/runner/.config/rclone/sa.json', 'w') as f:
-                json.dump(parsed_key, f)
+            decoded = base64.b64decode(raw_key).decode('utf-8')
+            json.loads(decoded) # Validasi JSON
+            with open(sa_path, 'w') as f:
+                f.write(decoded)
+            print('[+] SA Key berhasil di-decode dari Base64.')
         except Exception:
-            # Jika mentah, tulis langsung
-            with open('/home/runner/.config/rclone/sa.json', 'w') as f:
+            # Jika bukan Base64, tulis langsung
+            with open(sa_path, 'w') as f:
                 f.write(raw_key)
+            print('[+] SA Key ditulis langsung.')
 
-        # 2. Extract Folder ID bersih dari secret DRIVE_FILE_ID
+        # Ambil Clean Drive ID
         raw_id = os.environ.get('DRIVE_FILE_ID', '').strip()
         match = re.search(r'([a-zA-Z0-9_-]{25,})', raw_id)
         clean_id = match.group(1) if match else raw_id
 
-        # 3. Buat rclone.conf
         rclone_conf = f'''[gdrive]
 type = drive
 scope = drive
-service_account_credentials = /home/runner/.config/rclone/sa.json
+service_account_credentials = {sa_path}
 root_folder_id = {clean_id}
 '''
         with open('/home/runner/.config/rclone/rclone.conf', 'w') as f:
             f.write(rclone_conf)
-
-        print(f'[+] Config Rclone beres! Root ID: {clean_id}')
         "
+
+        # Debugging singkat untuk memastikan file sa.json bukan kosong/HTML
+        echo "=== Cek Baris Pertama sa.json ==="
+        head -n 2 /home/runner/.config/rclone/sa.json
 
         mkdir -p ./drive_sf
         rclone mount gdrive: ./drive_sf --vfs-cache-mode writes --allow-other --daemon
@@ -90,7 +95,6 @@ root_folder_id = {clean_id}
         python3 -c "
         import os, subprocess
 
-        # Otomatis mengambil target dari matrix GitHub Actions
         target_dir = os.path.join('./drive_sf', '${{ matrix.target }}')
         processes = []
 
