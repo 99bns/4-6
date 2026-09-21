@@ -1,7 +1,7 @@
-name: "sm2m"
+name: "sm2m-realtime"
 
 on:
-  workflow_dispatch: # Hanya bisa dijalankan manual via tab Actions
+  workflow_dispatch: # Jalankan manual dari tab Actions
 
 concurrency:
   group: emjuh-workflow-lock
@@ -17,8 +17,9 @@ jobs:
 
     strategy:
       fail-fast: false
+      # KUNCI EDIT DILAKUKAN DI SINI (Ubah nama folder di Drive sesuai kebutuhan):
       matrix:
-        target: ['11', '12', '13', '14', '15', '16', '17', '18', '19', '20']
+        target: ['71', '71b']
 
     steps:
     - name: Checkout Repository
@@ -29,46 +30,57 @@ jobs:
       with:
         python-version: '3.10'
 
-    - name: Install Google Chrome & Hapus Chromedriver Sistem
+    - name: Install Google Chrome & Rclone System
       run: |
         sudo apt-get update
-        sudo apt-get install -y wget google-chrome-stable
+        sudo apt-get install -y wget curl rclone fuse3 google-chrome-stable
         sudo rm -f /usr/bin/chromedriver
 
-    - name: Install Dependencies
+    - name: Install Python Packages
       run: |
         python -m pip install --upgrade pip
-        pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib selenium requests selenium-stealth undetected-chromedriver
+        pip install requests selenium selenium-stealth colorama certifi urllib3
 
-    - name: Download & Extract Files from Google Drive
-      env:
-        GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
-        DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FILE_ID }}
-        TARGET_ACCOUNT: ${{ matrix.target }}
-      run: python download_drive.py
+    - name: Setup & Mount Folder SF (Real-time Stream)
+      run: |
+        mkdir -p ~/.config/rclone
+        echo '${{ secrets.GCP_SA_KEY }}' > ~/.config/rclone/sa.json
+        
+        cat <<EOF > ~/.config/rclone/rclone.conf
+        [gdrive]
+        type = drive
+        scope = drive
+        service_account_credentials = ~/.config/rclone/sa.json
+        root_folder_id = ${{ secrets.DRIVE_FILE_ID }}
+        EOF
+
+        mkdir -p ./drive_sf
+        rclone mount gdrive: ./drive_sf --vfs-cache-mode writes --allow-other --daemon
+        sleep 5
 
     - name: Run All Subfolder Bots In Parallel
       run: |
         python3 -c "
         import os, subprocess
 
-        target = '${{ matrix.target }}'
+        # Otomatis mengambil target dari matrix GitHub Actions
+        target_dir = os.path.join('./drive_sf', '${{ matrix.target }}')
         processes = []
 
         def run_bot_loop(bot_dir):
             cmd = f'until python3 sm.py; do echo \"[!] Bot di {bot_dir} terhenti. Restart dalam 5s...\"; sleep 5; done'
             return subprocess.Popen(cmd, shell=True, cwd=bot_dir, executable='/bin/bash')
 
-        if os.path.exists(target):
-            for root, dirs, files in os.walk(target):
+        if os.path.exists(target_dir):
+            for root, dirs, files in os.walk(target_dir):
                 if 'sm.py' in files:
-                    print(f'==> Menjalankan Bot dengan Auto-Restart di: {root}')
+                    print(f'==> Menjalankan Bot Real-time di: {root}')
                     p = run_bot_loop(root)
                     processes.append(p)
 
             for p in processes:
                 p.wait()
         else:
-            print(f'[!] ERROR: Folder {target} tidak ditemukan!')
+            print(f'[!] ERROR: Folder {target_dir} tidak ditemukan di Google Drive!')
             exit(1)
         "
