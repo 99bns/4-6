@@ -48,21 +48,28 @@ jobs:
       run: |
         mkdir -p /home/runner/.config/rclone
         
-        # Parse JSON SA Key & Filter Drive Folder ID dari URL/Garis Miring
         python3 -c "
         import os, json, re
-        
-        # 1. Simpan SA Key
+
+        # 1. Olah dan Simpan SA Key
         raw_key = os.environ.get('SA_KEY', '')
         data = json.loads(raw_key)
         with open('/home/runner/.config/rclone/sa.json', 'w') as f:
             json.dump(data, f)
-            
-        # 2. Extract Bersih Folder ID (Buang URL & Garis Miring)
+
+        # 2. Ekstrak Folder ID (Mendukung URL lengkap maupun ID murni)
         raw_id = os.environ.get('FOLDER_ID_RAW', '').strip()
-        clean_id = raw_id.split('/')[-1].split('?')[0] # Ambil ID paling belakang
-        
-        # Write config Rclone
+
+        if 'drive.google.com' in raw_id or '/' in raw_id:
+            match = re.search(r'folders/([a-zA-Z0-9_-]+)', raw_id)
+            if match:
+                clean_id = match.group(1)
+            else:
+                clean_id = raw_id.split('/')[-1].split('?')[0]
+        else:
+            clean_id = raw_id
+
+        # 3. Tulis Konfigurasi Rclone
         rclone_conf = f'''[gdrive]
 type = drive
 scope = drive
@@ -71,7 +78,7 @@ root_folder_id = {clean_id}
 '''
         with open('/home/runner/.config/rclone/rclone.conf', 'w') as f:
             f.write(rclone_conf)
-            
+
         print(f'[+] Config Rclone berhasil dibuat dengan Root Folder ID: {clean_id}')
         "
 
