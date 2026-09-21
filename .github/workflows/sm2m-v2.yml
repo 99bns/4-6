@@ -47,42 +47,28 @@ jobs:
       run: |
         mkdir -p /home/runner/.config/rclone
 
+        # Tulis SA KEY langsung via python tanpa terpengaruh shell quote
         python3 -c "
         import os, json, re
 
-        raw_key = os.environ.get('GCP_SA_KEY', '').strip()
+        sa_content = os.environ.get('GCP_SA_KEY', '')
+        with open('/home/runner/.config/rclone/sa.json', 'w') as f:
+            f.write(sa_content)
 
-        # 1. Parse JSON
-        try:
-            data = json.loads(raw_key)
-        except Exception:
-            # Jika ada \n ter-escape ganda, ganti ke enter asli
-            raw_key_fixed = raw_key.replace('\\\\n', '\n')
-            data = json.loads(raw_key_fixed)
-
-        # 2. Perbaiki private_key jika masih mengandung karakter \n teks biasa
-        if 'private_key' in data and '\\n' in data['private_key']:
-            data['private_key'] = data['private_key'].replace('\\n', '\n')
-
-        sa_path = '/home/runner/.config/rclone/sa.json'
-        with open(sa_path, 'w') as f:
-            json.dump(data, f)
-
-        # 3. Clean DRIVE_FILE_ID (Otomatis ambil ID dari link URL Drive)
+        # Otomatis buang URL / slash dari DRIVE_FILE_ID jika ada
         raw_id = os.environ.get('DRIVE_FILE_ID', '').strip()
-        match = re.search(r'([a-zA-Z0-9_-]{25,})', raw_id)
-        clean_id = match.group(1) if match else raw_id
+        clean_id = raw_id.split('/')[-1].split('?')[0]
 
-        rclone_conf = f'''[gdrive]
+        conf = f'''[gdrive]
 type = drive
 scope = drive
-service_account_credentials = {sa_path}
+service_account_credentials = /home/runner/.config/rclone/sa.json
 root_folder_id = {clean_id}
 '''
         with open('/home/runner/.config/rclone/rclone.conf', 'w') as f:
-            f.write(rclone_conf)
+            f.write(conf)
 
-        print('[+] Berhasil memperbaiki private_key & membuat sa.json valid!')
+        print('[+] Config rclone berhasil dibuat!')
         "
 
         mkdir -p ./drive_sf
