@@ -245,11 +245,11 @@ jobs:
         # ========================================================
 
         rclone_conf = f"""[gdrive]
-        type = drive
-        scope = drive
-        service_account_file = {sa_path}
-        root_folder_id = {clean_id}
-        """
+type = drive
+scope = drive
+service_account_file = {sa_path}
+root_folder_id = {clean_id}
+"""
 
 
         config_path = "/home/runner/.config/rclone/rclone.conf"
@@ -338,7 +338,7 @@ jobs:
 
 
     # ============================================================
-    # RUN BOTS
+    # RUN BOTS (WITH AUTO RELAY TIMER)
     # ============================================================
 
     - name: Run All Subfolder Bots In Parallel
@@ -349,6 +349,7 @@ jobs:
         import os
         import subprocess
         import sys
+        import time
 
 
         target = "${{ matrix.target }}"
@@ -441,13 +442,22 @@ jobs:
 
 
         # ========================================================
-        # WAIT
+        # WAIT WITH TIMEOUT FOR ESTAFET (315 MINUTES)
         # ========================================================
 
-        try:
+        MAX_RUN_TIME = 315 * 60  # 315 menit (5 jam 15 menit)
+        start_time = time.time()
 
-            for process in processes:
-                process.wait()
+        try:
+            while True:
+                elapsed = time.time() - start_time
+                if elapsed >= MAX_RUN_TIME:
+                    print("\n[+] Batas waktu estafet tercapai (315 menit). Menghentikan bot secara halus...")
+                    for process in processes:
+                        process.terminate()
+                    break
+
+                time.sleep(10)
 
         except KeyboardInterrupt:
 
@@ -457,3 +467,36 @@ jobs:
                 process.terminate()
 
         PYTHON
+
+
+    # ============================================================
+    # AUTO-RELAY & KILL SELF
+    # ============================================================
+
+    - name: Trigger Run Baru & Cancel Run Ini
+      if: always() && matrix.target == '71'
+      env:
+        GH_TOKEN: ${{ secrets.MY_PAT }}
+      run: |
+        echo "========================================"
+        echo "[+] Memicu Workflow Baru untuk Estafet..."
+        echo "========================================"
+
+        # 1. Trigger run baru (misal bakal jadi #24)
+        curl -X POST \
+          -H "Authorization: token $GH_TOKEN" \
+          -H "Accept: application/vnd.github.v3+json" \
+          https://api.github.com/repos/${{ github.repository }}/actions/workflows/sm2m-v2.yml/dispatches \
+          -d '{"ref":"main"}'
+
+        sleep 10
+
+        echo "========================================"
+        echo "[+] Mematikan (Cancel) Run Sekarang ID: ${{ github.run_id }}..."
+        echo "========================================"
+
+        # 2. Kill / Cancel run yang sekarang sedang jalan ini
+        curl -X POST \
+          -H "Authorization: token $GH_TOKEN" \
+          -H "Accept: application/vnd.github.v3+json" \
+          https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/cancel
