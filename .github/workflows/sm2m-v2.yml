@@ -47,8 +47,21 @@ jobs:
       run: |
         mkdir -p /home/runner/.config/rclone
         
-        # Tulis JSON mentah menggunakan variabel lingkungan biar aman
-        python3 -c "import os, json; open('/home/runner/.config/rclone/sa.json', 'w').write(os.environ['SA_KEY'])"
+        # Ekstrak dan bersihkan isi JSON menggunakan Python
+        python3 -c "
+        import os, json
+        
+        raw_key = os.environ.get('SA_KEY', '')
+        try:
+            # Parse JSON untuk memastikan format valid
+            data = json.loads(raw_key)
+            with open('/home/runner/.config/rclone/sa.json', 'w') as f:
+                json.dump(data, f)
+            print('[+] Berhasil membuat sa.json yang valid.')
+        except Exception as e:
+            print(f'[!] Gagal parse JSON dari GCP_SA_KEY: {e}')
+            exit(1)
+        "
         
         cat <<EOF > /home/runner/.config/rclone/rclone.conf
         [gdrive]
