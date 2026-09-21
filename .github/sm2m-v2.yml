@@ -1,4 +1,4 @@
-name: "sm2m-realtime"
+name: "sm2m-v2"
 
 on:
   workflow_dispatch: # Jalankan manual dari tab Actions
