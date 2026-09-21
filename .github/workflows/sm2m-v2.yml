@@ -44,32 +44,36 @@ jobs:
     - name: Setup & Mount Folder SF (Real-time Stream)
       env:
         SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        FOLDER_ID_RAW: ${{ secrets.DRIVE_FILE_ID }}
       run: |
         mkdir -p /home/runner/.config/rclone
         
-        # Ekstrak dan bersihkan isi JSON menggunakan Python
+        # Parse JSON SA Key & Filter Drive Folder ID dari URL/Garis Miring
         python3 -c "
-        import os, json
+        import os, json, re
         
+        # 1. Simpan SA Key
         raw_key = os.environ.get('SA_KEY', '')
-        try:
-            # Parse JSON untuk memastikan format valid
-            data = json.loads(raw_key)
-            with open('/home/runner/.config/rclone/sa.json', 'w') as f:
-                json.dump(data, f)
-            print('[+] Berhasil membuat sa.json yang valid.')
-        except Exception as e:
-            print(f'[!] Gagal parse JSON dari GCP_SA_KEY: {e}')
-            exit(1)
-        "
+        data = json.loads(raw_key)
+        with open('/home/runner/.config/rclone/sa.json', 'w') as f:
+            json.dump(data, f)
+            
+        # 2. Extract Bersih Folder ID (Buang URL & Garis Miring)
+        raw_id = os.environ.get('FOLDER_ID_RAW', '').strip()
+        clean_id = raw_id.split('/')[-1].split('?')[0] # Ambil ID paling belakang
         
-        cat <<EOF > /home/runner/.config/rclone/rclone.conf
-        [gdrive]
-        type = drive
-        scope = drive
-        service_account_credentials = /home/runner/.config/rclone/sa.json
-        root_folder_id = ${{ secrets.DRIVE_FILE_ID }}
-        EOF
+        # Write config Rclone
+        rclone_conf = f'''[gdrive]
+type = drive
+scope = drive
+service_account_credentials = /home/runner/.config/rclone/sa.json
+root_folder_id = {clean_id}
+'''
+        with open('/home/runner/.config/rclone/rclone.conf', 'w') as f:
+            f.write(rclone_conf)
+            
+        print(f'[+] Config Rclone berhasil dibuat dengan Root Folder ID: {clean_id}')
+        "
 
         mkdir -p ./drive_sf
         rclone mount gdrive: ./drive_sf --vfs-cache-mode writes --allow-other --daemon
