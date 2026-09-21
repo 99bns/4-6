@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: ['71', '71b']
+        target: ['71', '71b', '72', '73', '74', '75', '76', '77', '78']
 
     steps:
 
