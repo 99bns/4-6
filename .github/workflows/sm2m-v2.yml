@@ -42,9 +42,13 @@ jobs:
         pip install requests selenium selenium-stealth colorama certifi urllib3
 
     - name: Setup & Mount Folder SF (Real-time Stream)
+      env:
+        SA_KEY: ${{ secrets.GCP_SA_KEY }}
       run: |
         mkdir -p /home/runner/.config/rclone
-        printf '%s' "${{ secrets.GCP_SA_KEY }}" > /home/runner/.config/rclone/sa.json
+        
+        # Tulis JSON mentah menggunakan variabel lingkungan biar aman
+        python3 -c "import os, json; open('/home/runner/.config/rclone/sa.json', 'w').write(os.environ['SA_KEY'])"
         
         cat <<EOF > /home/runner/.config/rclone/rclone.conf
         [gdrive]
