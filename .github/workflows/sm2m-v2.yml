@@ -42,33 +42,49 @@ jobs:
 
     - name: Setup & Mount Folder SF
       env:
-        GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
-        DRIVE_FILE_ID: ${{ secrets.DRIVE_FILE_ID }}
+        RAW_GCP_KEY: ${{ secrets.GCP_SA_KEY }}
+        RAW_DRIVE_ID: ${{ secrets.DRIVE_FILE_ID }}
       run: |
         mkdir -p /home/runner/.config/rclone
 
-        # Tulis SA KEY langsung via python tanpa terpengaruh shell quote
         python3 -c "
         import os, json, re
 
-        sa_content = os.environ.get('GCP_SA_KEY', '')
-        with open('/home/runner/.config/rclone/sa.json', 'w') as f:
-            f.write(sa_content)
+        # Read environment variables directly
+        key_data = os.environ.get('RAW_GCP_KEY', '')
+        
+        # Parse JSON and fix double-escaped newlines in private_key
+        try:
+            parsed = json.loads(key_data)
+        except Exception:
+            # Handle case where newlines are literal \n strings
+            key_data_clean = key_data.replace('\\\\n', '\\n')
+            parsed = json.loads(key_data_clean)
 
-        # Otomatis buang URL / slash dari DRIVE_FILE_ID jika ada
-        raw_id = os.environ.get('DRIVE_FILE_ID', '').strip()
-        clean_id = raw_id.split('/')[-1].split('?')[0]
+        if 'private_key' in parsed:
+            parsed['private_key'] = parsed['private_key'].replace('\\n', '\n')
 
-        conf = f'''[gdrive]
+        # Save sanitized JSON to file
+        sa_path = '/home/runner/.config/rclone/sa.json'
+        with open(sa_path, 'w', encoding='utf-8') as f:
+            json.dump(parsed, f, indent=2)
+
+        # Sanitize Drive Folder ID
+        raw_id = os.environ.get('RAW_DRIVE_ID', '').strip()
+        match = re.search(r'([a-zA-Z0-9_-]{25,})', raw_id)
+        clean_id = match.group(1) if match else raw_id
+
+        # Generate rclone config
+        rclone_conf = f'''[gdrive]
 type = drive
 scope = drive
-service_account_credentials = /home/runner/.config/rclone/sa.json
+service_account_credentials = {sa_path}
 root_folder_id = {clean_id}
 '''
-        with open('/home/runner/.config/rclone/rclone.conf', 'w') as f:
-            f.write(conf)
+        with open('/home/runner/.config/rclone/rclone.conf', 'w', encoding='utf-8') as f:
+            f.write(rclone_conf)
 
-        print('[+] Config rclone berhasil dibuat!')
+        print('[+] sa.json & rclone.conf successfully written and formatted.')
         "
 
         mkdir -p ./drive_sf
