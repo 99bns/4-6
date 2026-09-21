@@ -241,328 +241,328 @@ jobs:
 
         python3 <<'PYTHON'
 
-import base64
-import json
-import os
-import re
-import sys
+        import base64
+        import json
+        import os
+        import re
+        import sys
 
 
-# ============================================================
-# READ SERVICE ACCOUNT SECRET
-# ============================================================
+        # ============================================================
+        # READ SERVICE ACCOUNT SECRET
+        # ============================================================
 
-with open(
-    "/tmp/sa_b64.txt",
-    "r",
-    encoding="utf-8"
-) as f:
+        with open(
+            "/tmp/sa_b64.txt",
+            "r",
+            encoding="utf-8"
+        ) as f:
 
-    b64_str = f.read().strip()
-
-
-if not b64_str:
-
-    print(
-        "[!] ERROR: GCP_SA_KEY kosong!"
-    )
-
-    sys.exit(1)
+            b64_str = f.read().strip()
 
 
-# ============================================================
-# DECODE BASE64
-# ============================================================
+        if not b64_str:
 
-try:
+            print(
+                "[!] ERROR: GCP_SA_KEY kosong!"
+            )
 
-    raw_json_bytes = base64.b64decode(
-        b64_str
-    )
-
-    raw_json_str = raw_json_bytes.decode(
-        "utf-8"
-    )
-
-except Exception as e:
-
-    print(
-        f"[!] ERROR decode secret: {e}"
-    )
-
-    sys.exit(1)
+            sys.exit(1)
 
 
-# ============================================================
-# PARSE JSON
-# ============================================================
+        # ============================================================
+        # DECODE BASE64
+        # ============================================================
 
-try:
+        try:
 
-    data = json.loads(
-        raw_json_str
-    )
+            raw_json_bytes = base64.b64decode(
+                b64_str
+            )
+
+            raw_json_str = raw_json_bytes.decode(
+                "utf-8"
+            )
+
+        except Exception as e:
+
+            print(
+                f"[!] ERROR decode secret: {e}"
+            )
+
+            sys.exit(1)
 
 
-except json.JSONDecodeError:
+        # ============================================================
+        # PARSE JSON
+        # ============================================================
 
-    # ========================================================
-    # COBA REPAIR PRIVATE KEY
-    # ========================================================
+        try:
 
-    try:
+            data = json.loads(
+                raw_json_str
+            )
 
-        repaired = raw_json_str.replace(
-            "\\\\n",
-            "\\n"
+
+        except json.JSONDecodeError:
+
+            # ========================================================
+            # COBA REPAIR PRIVATE KEY
+            # ========================================================
+
+            try:
+
+                repaired = raw_json_str.replace(
+                    "\\\\n",
+                    "\\n"
+                )
+
+                data = json.loads(
+                    repaired
+                )
+
+
+            except Exception as e:
+
+                print(
+                    "[!] ERROR: GCP_SA_KEY bukan JSON valid!"
+                )
+
+                print(
+                    f"[!] Detail: {e}"
+                )
+
+                sys.exit(1)
+
+
+        # ============================================================
+        # VALIDATE SERVICE ACCOUNT
+        # ============================================================
+
+        required_fields = [
+
+            "type",
+            "project_id",
+            "private_key",
+            "client_email"
+
+        ]
+
+
+        for field in required_fields:
+
+            if field not in data:
+
+                print(
+                    f"[!] ERROR: Field '{field}' "
+                    "tidak ditemukan di GCP_SA_KEY"
+                )
+
+                sys.exit(1)
+
+
+        # ============================================================
+        # CHECK TYPE
+        # ============================================================
+
+        if data.get("type") != "service_account":
+
+            print(
+                "[!] ERROR: JSON bukan Service Account!"
+            )
+
+            sys.exit(1)
+
+
+        # ============================================================
+        # REPAIR PRIVATE KEY NEWLINE
+        # ============================================================
+
+        if "\\n" in data["private_key"]:
+
+            data["private_key"] = data[
+                "private_key"
+            ].replace(
+                "\\n",
+                "\n"
+            )
+
+
+        # ============================================================
+        # SAVE SERVICE ACCOUNT
+        # ============================================================
+
+        sa_path = (
+            "/home/runner/.config/rclone/sa.json"
         )
 
-        data = json.loads(
-            repaired
+
+        with open(
+            sa_path,
+            "w",
+            encoding="utf-8"
+        ) as f:
+
+            json.dump(
+                data,
+                f,
+                indent=2
+            )
+
+
+        # ============================================================
+        # DRIVE ROOT FOLDER ID
+        # ============================================================
+
+        raw_id = os.environ.get(
+            "RAW_DRIVE_ID",
+            ""
+        ).strip()
+
+
+        if not raw_id:
+
+            print(
+                "[!] ERROR: DRIVE_FILE_ID kosong!"
+            )
+
+            sys.exit(1)
+
+
+        # ============================================================
+        # SUPPORT DRIVE ID FORMAT
+        # ============================================================
+        #
+        # 1. ID langsung
+        #
+        # 2. https://drive.google.com/drive/folders/XXXXX
+        #
+        # 3. https://drive.google.com/open?id=XXXXX
+        #
+        # ============================================================
+
+        if "/folders/" in raw_id:
+
+            clean_id = raw_id.split(
+                "/folders/",
+                1
+            )[1]
+
+            clean_id = clean_id.split(
+                "?",
+                1
+            )[0]
+
+            clean_id = clean_id.split(
+                "/",
+                1
+            )[0]
+
+
+        elif "id=" in raw_id:
+
+            match = re.search(
+                r"[?&]id=([^&]+)",
+                raw_id
+            )
+
+            if match:
+
+                clean_id = match.group(1)
+
+            else:
+
+                clean_id = raw_id
+
+
+        else:
+
+            clean_id = raw_id
+
+            clean_id = clean_id.split(
+                "?",
+                1
+            )[0]
+
+            clean_id = clean_id.rstrip("/")
+
+
+        clean_id = clean_id.strip()
+
+
+        # ============================================================
+        # VALIDATE DRIVE ID
+        # ============================================================
+
+        if not clean_id:
+
+            print(
+                "[!] ERROR: Tidak bisa membaca DRIVE_FILE_ID!"
+            )
+
+            sys.exit(1)
+
+
+        # ============================================================
+        # CREATE RCLONE CONFIG
+        # ============================================================
+
+        rclone_conf = f"""[gdrive]
+        type = drive
+        scope = drive
+        service_account_file = {sa_path}
+        root_folder_id = {clean_id}
+        """
+
+
+        config_path = (
+            "/home/runner/.config/rclone/rclone.conf"
         )
 
 
-    except Exception as e:
+        with open(
+            config_path,
+            "w",
+            encoding="utf-8"
+        ) as f:
+
+            f.write(
+                rclone_conf
+            )
+
+
+        # ============================================================
+        # INFO
+        # ============================================================
 
         print(
-            "[!] ERROR: GCP_SA_KEY bukan JSON valid!"
+            "[+] Service Account OK"
         )
 
         print(
-            f"[!] Detail: {e}"
+            "[+] sa.json berhasil dibuat"
         )
-
-        sys.exit(1)
-
-
-# ============================================================
-# VALIDATE SERVICE ACCOUNT
-# ============================================================
-
-required_fields = [
-
-    "type",
-    "project_id",
-    "private_key",
-    "client_email"
-
-]
-
-
-for field in required_fields:
-
-    if field not in data:
 
         print(
-            f"[!] ERROR: Field '{field}' "
-            "tidak ditemukan di GCP_SA_KEY"
+            "[+] rclone.conf berhasil dibuat"
         )
 
-        sys.exit(1)
-
-
-# ============================================================
-# CHECK TYPE
-# ============================================================
-
-if data.get("type") != "service_account":
-
-    print(
-        "[!] ERROR: JSON bukan Service Account!"
-    )
-
-    sys.exit(1)
-
-
-# ============================================================
-# REPAIR PRIVATE KEY NEWLINE
-# ============================================================
-
-if "\\n" in data["private_key"]:
-
-    data["private_key"] = data[
-        "private_key"
-    ].replace(
-        "\\n",
-        "\n"
-    )
-
-
-# ============================================================
-# SAVE SERVICE ACCOUNT
-# ============================================================
-
-sa_path = (
-    "/home/runner/.config/rclone/sa.json"
-)
-
-
-with open(
-    sa_path,
-    "w",
-    encoding="utf-8"
-) as f:
-
-    json.dump(
-        data,
-        f,
-        indent=2
-    )
-
-
-# ============================================================
-# DRIVE ROOT FOLDER ID
-# ============================================================
-
-raw_id = os.environ.get(
-    "RAW_DRIVE_ID",
-    ""
-).strip()
-
-
-if not raw_id:
-
-    print(
-        "[!] ERROR: DRIVE_FILE_ID kosong!"
-    )
-
-    sys.exit(1)
-
-
-# ============================================================
-# SUPPORT DRIVE ID FORMAT
-# ============================================================
-#
-# 1. ID langsung
-#
-# 2. https://drive.google.com/drive/folders/XXXXX
-#
-# 3. https://drive.google.com/open?id=XXXXX
-#
-# ============================================================
-
-if "/folders/" in raw_id:
-
-    clean_id = raw_id.split(
-        "/folders/",
-        1
-    )[1]
-
-    clean_id = clean_id.split(
-        "?",
-        1
-    )[0]
-
-    clean_id = clean_id.split(
-        "/",
-        1
-    )[0]
-
-
-elif "id=" in raw_id:
-
-    match = re.search(
-        r"[?&]id=([^&]+)",
-        raw_id
-    )
-
-    if match:
-
-        clean_id = match.group(1)
-
-    else:
-
-        clean_id = raw_id
-
-
-else:
-
-    clean_id = raw_id
-
-    clean_id = clean_id.split(
-        "?",
-        1
-    )[0]
-
-    clean_id = clean_id.rstrip("/")
-
-
-clean_id = clean_id.strip()
-
-
-# ============================================================
-# VALIDATE DRIVE ID
-# ============================================================
-
-if not clean_id:
-
-    print(
-        "[!] ERROR: Tidak bisa membaca DRIVE_FILE_ID!"
-    )
-
-    sys.exit(1)
-
-
-# ============================================================
-# CREATE RCLONE CONFIG
-# ============================================================
-
-rclone_conf = f"""[gdrive]
-type = drive
-scope = drive
-service_account_file = {sa_path}
-root_folder_id = {clean_id}
-"""
-
-
-config_path = (
-    "/home/runner/.config/rclone/rclone.conf"
-)
-
-
-with open(
-    config_path,
-    "w",
-    encoding="utf-8"
-) as f:
-
-    f.write(
-        rclone_conf
-    )
-
-
-# ============================================================
-# INFO
-# ============================================================
-
-print(
-    "[+] Service Account OK"
-)
-
-print(
-    "[+] sa.json berhasil dibuat"
-)
-
-print(
-    "[+] rclone.conf berhasil dibuat"
-)
-
-print(
-    f"[+] Project ID : "
-    f"{data.get('project_id')}"
-)
-
-print(
-    f"[+] Client Email: "
-    f"{data.get('client_email')}"
-)
-
-print(
-    f"[+] Drive Root ID: "
-    f"{clean_id}"
-)
-
-PYTHON
+        print(
+            f"[+] Project ID : "
+            f"{data.get('project_id')}"
+        )
+
+        print(
+            f"[+] Client Email: "
+            f"{data.get('client_email')}"
+        )
+
+        print(
+            f"[+] Drive Root ID: "
+            f"{clean_id}"
+        )
+
+        PYTHON
 
 
         # ======================================================
@@ -709,362 +709,362 @@ PYTHON
 
         python3 <<'PYTHON'
 
-import os
-import signal
-import subprocess
-import sys
-import time
+        import os
+        import signal
+        import subprocess
+        import sys
+        import time
 
 
-# ============================================================
-# CONFIG
-# ============================================================
+        # ============================================================
+        # CONFIG
+        # ============================================================
 
-target = "${{ matrix.target }}"
-
-
-target_dir = os.path.join(
-    "./drive_sf",
-    target
-)
+        target = "${{ matrix.target }}"
 
 
-runtime_minutes = int(
-    os.environ.get(
-        "BOT_RUNTIME_MINUTES",
-        "320"
-    )
-)
+        target_dir = os.path.join(
+            "./drive_sf",
+            target
+        )
 
 
-runtime_seconds = (
-    runtime_minutes * 60
-)
+        runtime_minutes = int(
+            os.environ.get(
+                "BOT_RUNTIME_MINUTES",
+                "320"
+            )
+        )
 
 
-# ============================================================
-# HEADER
-# ============================================================
-
-print(
-    "=" * 60
-)
-
-print(
-    f"TARGET MATRIX : {target}"
-)
-
-print(
-    f"TARGET FOLDER : {target_dir}"
-)
-
-print(
-    f"BOT RUNTIME   : {runtime_minutes} menit"
-)
-
-print(
-    "=" * 60
-)
+        runtime_seconds = (
+            runtime_minutes * 60
+        )
 
 
-# ============================================================
-# PROCESS LIST
-# ============================================================
-
-processes = []
-
-
-# ============================================================
-# RUN BOT LOOP
-# ============================================================
-
-def run_bot_loop(bot_dir):
-
-    cmd = (
-        "while true; do "
-        "python3 sm.py; "
-        "EXIT_CODE=$?; "
-        f'echo "[!] Bot di {bot_dir} berhenti dengan code $EXIT_CODE"; '
-        'echo "[!] Restart dalam 5 detik..."; '
-        "sleep 5; "
-        "done"
-    )
-
-
-    process = subprocess.Popen(
-
-        cmd,
-
-        shell=True,
-
-        cwd=bot_dir,
-
-        executable="/bin/bash",
-
-        # ====================================================
-        # BUAT PROCESS GROUP SENDIRI
-        # ====================================================
-
-        start_new_session=True
-
-    )
-
-
-    return process
-
-
-# ============================================================
-# CHECK TARGET DIRECTORY
-# ============================================================
-
-if not os.path.exists(target_dir):
-
-    print(
-        f"[!] ERROR: Folder {target_dir} "
-        "tidak ditemukan di Google Drive!"
-    )
-
-    sys.exit(1)
-
-
-# ============================================================
-# SEARCH sm.py
-# ============================================================
-
-for root, dirs, files in os.walk(
-    target_dir
-):
-
-    if "sm.py" in files:
+        # ============================================================
+        # HEADER
+        # ============================================================
 
         print(
-            f"==> Menjalankan Bot Real-time di: {root}"
+            "=" * 60
+        )
+
+        print(
+            f"TARGET MATRIX : {target}"
+        )
+
+        print(
+            f"TARGET FOLDER : {target_dir}"
+        )
+
+        print(
+            f"BOT RUNTIME   : {runtime_minutes} menit"
+        )
+
+        print(
+            "=" * 60
         )
 
 
-        process = run_bot_loop(
-            root
+        # ============================================================
+        # PROCESS LIST
+        # ============================================================
+
+        processes = []
+
+
+        # ============================================================
+        # RUN BOT LOOP
+        # ============================================================
+
+        def run_bot_loop(bot_dir):
+
+            cmd = (
+                "while true; do "
+                "python3 sm.py; "
+                "EXIT_CODE=$?; "
+                f'echo "[!] Bot di {bot_dir} berhenti dengan code $EXIT_CODE"; '
+                'echo "[!] Restart dalam 5 detik..."; '
+                "sleep 5; "
+                "done"
+            )
+
+
+            process = subprocess.Popen(
+
+                cmd,
+
+                shell=True,
+
+                cwd=bot_dir,
+
+                executable="/bin/bash",
+
+                # ====================================================
+                # BUAT PROCESS GROUP SENDIRI
+                # ====================================================
+
+                start_new_session=True
+
+            )
+
+
+            return process
+
+
+        # ============================================================
+        # CHECK TARGET DIRECTORY
+        # ============================================================
+
+        if not os.path.exists(target_dir):
+
+            print(
+                f"[!] ERROR: Folder {target_dir} "
+                "tidak ditemukan di Google Drive!"
+            )
+
+            sys.exit(1)
+
+
+        # ============================================================
+        # SEARCH sm.py
+        # ============================================================
+
+        for root, dirs, files in os.walk(
+            target_dir
+        ):
+
+            if "sm.py" in files:
+
+                print(
+                    f"==> Menjalankan Bot Real-time di: {root}"
+                )
+
+
+                process = run_bot_loop(
+                    root
+                )
+
+
+                processes.append(
+                    process
+                )
+
+
+        # ============================================================
+        # CHECK BOT
+        # ============================================================
+
+        if not processes:
+
+            print(
+                f"[!] ERROR: Tidak ditemukan sm.py "
+                f"di dalam {target_dir}"
+            )
+
+            sys.exit(1)
+
+
+        # ============================================================
+        # INFO
+        # ============================================================
+
+        print("")
+
+        print(
+            f"[+] Total bot berjalan: "
+            f"{len(processes)}"
+        )
+
+        print("")
+
+        print(
+            f"[+] Bot akan berjalan selama "
+            f"{runtime_minutes} menit."
+        )
+
+        print("")
+
+
+        # ============================================================
+        # TIMER
+        # ============================================================
+
+        start_time = time.monotonic()
+
+
+        deadline = (
+            start_time +
+            runtime_seconds
         )
 
 
-        processes.append(
-            process
+        # ============================================================
+        # WAIT UNTIL DEADLINE
+        # ============================================================
+
+        try:
+
+            while True:
+
+                now = time.monotonic()
+
+
+                remaining = (
+                    deadline - now
+                )
+
+
+                if remaining <= 0:
+
+                    break
+
+
+                # ====================================================
+                # CHECK PROCESS
+                # ====================================================
+
+                alive_count = 0
+
+
+                for process in processes:
+
+                    if process.poll() is None:
+
+                        alive_count += 1
+
+
+                if alive_count == 0:
+
+                    print(
+                        "[!] Semua bot process berhenti!"
+                    )
+
+                    break
+
+
+                # ====================================================
+                # SLEEP
+                # ====================================================
+
+                sleep_time = min(
+                    60,
+                    remaining
+                )
+
+
+                time.sleep(
+                    sleep_time
+                )
+
+
+        except KeyboardInterrupt:
+
+            print(
+                "[!] Workflow dihentikan."
+            )
+
+
+        # ============================================================
+        # STOP ALL BOT PROCESS GROUPS
+        # ============================================================
+
+        print("")
+
+        print(
+            "=" * 60
         )
 
-
-# ============================================================
-# CHECK BOT
-# ============================================================
-
-if not processes:
-
-    print(
-        f"[!] ERROR: Tidak ditemukan sm.py "
-        f"di dalam {target_dir}"
-    )
-
-    sys.exit(1)
-
-
-# ============================================================
-# INFO
-# ============================================================
-
-print("")
-
-print(
-    f"[+] Total bot berjalan: "
-    f"{len(processes)}"
-)
-
-print("")
-
-print(
-    f"[+] Bot akan berjalan selama "
-    f"{runtime_minutes} menit."
-)
-
-print("")
-
-
-# ============================================================
-# TIMER
-# ============================================================
-
-start_time = time.monotonic()
-
-
-deadline = (
-    start_time +
-    runtime_seconds
-)
-
-
-# ============================================================
-# WAIT UNTIL DEADLINE
-# ============================================================
-
-try:
-
-    while True:
-
-        now = time.monotonic()
-
-
-        remaining = (
-            deadline - now
+        print(
+            "[+] Waktu bot selesai."
         )
 
+        print(
+            "[+] Menghentikan semua bot..."
+        )
 
-        if remaining <= 0:
-
-            break
-
-
-        # ====================================================
-        # CHECK PROCESS
-        # ====================================================
-
-        alive_count = 0
+        print(
+            "=" * 60
+        )
 
 
         for process in processes:
 
-            if process.poll() is None:
+            try:
 
-                alive_count += 1
+                if process.poll() is None:
 
+                    # =================================================
+                    # STOP SELURUH PROCESS GROUP
+                    # =================================================
 
-        if alive_count == 0:
-
-            print(
-                "[!] Semua bot process berhenti!"
-            )
-
-            break
-
-
-        # ====================================================
-        # SLEEP
-        # ====================================================
-
-        sleep_time = min(
-            60,
-            remaining
-        )
+                    os.killpg(
+                        os.getpgid(process.pid),
+                        signal.SIGTERM
+                    )
 
 
-        time.sleep(
-            sleep_time
-        )
+            except Exception as e:
+
+                print(
+                    f"[!] Gagal TERM process "
+                    f"{process.pid}: {e}"
+                )
 
 
-except KeyboardInterrupt:
+        # ============================================================
+        # WAIT
+        # ============================================================
 
-    print(
-        "[!] Workflow dihentikan."
-    )
-
-
-# ============================================================
-# STOP ALL BOT PROCESS GROUPS
-# ============================================================
-
-print("")
-
-print(
-    "=" * 60
-)
-
-print(
-    "[+] Waktu bot selesai."
-)
-
-print(
-    "[+] Menghentikan semua bot..."
-)
-
-print(
-    "=" * 60
-)
+        time.sleep(5)
 
 
-for process in processes:
+        # ============================================================
+        # FORCE KILL
+        # ============================================================
 
-    try:
+        for process in processes:
 
-        if process.poll() is None:
+            try:
 
-            # =================================================
-            # STOP SELURUH PROCESS GROUP
-            # =================================================
+                if process.poll() is None:
 
-            os.killpg(
-                os.getpgid(process.pid),
-                signal.SIGTERM
-            )
+                    print(
+                        f"[!] Process {process.pid} "
+                        "masih hidup."
+                    )
 
 
-    except Exception as e:
+                    print(
+                        "[!] Force kill process group..."
+                    )
+
+
+                    os.killpg(
+                        os.getpgid(process.pid),
+                        signal.SIGKILL
+                    )
+
+
+            except Exception as e:
+
+                print(
+                    f"[!] Gagal KILL process "
+                    f"{process.pid}: {e}"
+                )
+
+
+        print("")
 
         print(
-            f"[!] Gagal TERM process "
-            f"{process.pid}: {e}"
+            "[+] Semua bot sudah dihentikan."
         )
 
-
-# ============================================================
-# WAIT
-# ============================================================
-
-time.sleep(5)
+        print("")
 
 
-# ============================================================
-# FORCE KILL
-# ============================================================
-
-for process in processes:
-
-    try:
-
-        if process.poll() is None:
-
-            print(
-                f"[!] Process {process.pid} "
-                "masih hidup."
-            )
-
-
-            print(
-                "[!] Force kill process group..."
-            )
-
-
-            os.killpg(
-                os.getpgid(process.pid),
-                signal.SIGKILL
-            )
-
-
-    except Exception as e:
-
-        print(
-            f"[!] Gagal KILL process "
-            f"{process.pid}: {e}"
-        )
-
-
-print("")
-
-print(
-    "[+] Semua bot sudah dihentikan."
-)
-
-print("")
-
-
-PYTHON
+        PYTHON
 
 
     # ============================================================
